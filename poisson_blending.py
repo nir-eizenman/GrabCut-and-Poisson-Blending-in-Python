@@ -8,7 +8,6 @@ import argparse
 
 def poisson_blend(im_src, im_tgt, im_mask, center):
     # TODO: Implement Poisson blending of the source image onto the target ROI
-
     im_blend = im_tgt
     return im_blend
 
@@ -19,6 +18,7 @@ def parse():
     parser.add_argument('--mask_path', type=str, default='./data/seg_GT/banana1.bmp', help='mask file path')
     parser.add_argument('--tgt_path', type=str, default='./data/bg/table.jpg', help='mask file path')
     return parser.parse_args()
+
 
 if __name__ == "__main__":
     # Load the source and target images

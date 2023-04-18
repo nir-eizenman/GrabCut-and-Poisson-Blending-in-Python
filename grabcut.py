@@ -1,11 +1,14 @@
 import numpy as np
 import cv2
 import argparse
+from sklearn.mixture import GaussianMixture
+from sklearn.cluster import KMeans
+import igraph as ig
 
-GC_BGD = 0 # Hard bg pixel
-GC_FGD = 1 # Hard fg pixel, will not be used
-GC_PR_BGD = 2 # Soft bg pixel
-GC_PR_FGD = 3 # Soft fg pixel
+GC_BGD = 0  # Hard bg pixel
+GC_FGD = 1  # Hard fg pixel, will not be used
+GC_PR_BGD = 2  # Soft bg pixel
+GC_PR_FGD = 3  # Soft fg pixel
 
 
 # Define the GrabCut algorithm function
@@ -15,20 +18,24 @@ def grabcut(img, rect, n_iter=5):
     mask.fill(GC_BGD)
     x, y, w, h = rect
 
-    #Initalize the inner square to Foreground
-    mask[y:y+h, x:x+w] = GC_PR_FGD
-    mask[rect[1]+rect[3]//2, rect[0]+rect[2]//2] = GC_FGD
+    # Initalize the inner square to Foreground
+    mask[y:y + h, x:x + w] = GC_PR_FGD
+    mask[rect[1] + rect[3] // 2, rect[0] + rect[2] // 2] = GC_FGD
 
     bgGMM, fgGMM = initalize_GMMs(img, mask)
 
     num_iters = 1000
     for i in range(num_iters):
-        #Update GMM
+        # Update GMM
+        print("Iteration: " + str(i) + " before updating GMMs")
         bgGMM, fgGMM = update_GMMs(img, mask, bgGMM, fgGMM)
+        print("Iteration: " + str(i) + " after updating GMMs")
 
         mincut_sets, energy = calculate_mincut(img, mask, bgGMM, fgGMM)
 
+        print("Iteration: " + str(i) + " after calculating mincut, energy is: " + str(energy))
         mask = update_mask(mincut_sets, mask)
+        print("Iteration: " + str(i) + " after updating mask")
 
         if check_convergence(energy):
             break
@@ -37,42 +44,281 @@ def grabcut(img, rect, n_iter=5):
     return mask, bgGMM, fgGMM
 
 
-def initalize_GMMs(img, mask):
+"""
+2.1 init GMMs(img, mask, n components=5):
+In this method you should initialize and return two GMMs models one for
+the background and one for the foreground, each of them should consist of
+n components. The initialization should use kmeans. You could use your own
+implementation of GMM or use any existing one, however you should pay attention
+to the differences between off-the-shelf models and the use of it in the
+grabcut algorithm.
+"""
+
+
+def initalize_GMMs(img, mask, n_components=5):
     # TODO: implement initalize_GMMs
-    bgGMM = None
-    fgGMM = None
+
+    # Extract the foreground and background pixels from the mask
+    bg_mask = (mask == GC_BGD) | (mask == GC_PR_BGD)  # bg_mask is True if the mask is either GC_BGD or GC_PR_BGD
+    fg_mask = (mask == GC_FGD) | (mask == GC_PR_FGD)  # fg_mask is True if the mask is either GC_FGD or GC_PR_FGD
+
+    # Reshape the image to a 2D array of pixels and 3 color values (RGB) (separate foreground and background pixels)
+    # from a shape of (rows, cols, 3) to (rows*cols, 3)
+    bg_data = img[bg_mask].reshape(-1, 3)
+    fg_data = img[fg_mask].reshape(-1, 3)
+
+    # Initialize with k-means clustering
+    bg_kmeans = KMeans(n_clusters=n_components).fit(bg_data)
+    fg_kmeans = KMeans(n_clusters=n_components).fit(fg_data)
+
+    # Initialize GMMs with k-means cluster centers
+    bgGMM = GaussianMixture(n_components=n_components, means_init=bg_kmeans.cluster_centers_)
+    bgGMM.fit(bg_data)
+
+    fgGMM = GaussianMixture(n_components=n_components, means_init=fg_kmeans.cluster_centers_)
+    fgGMM.fit(fg_data)
 
     return bgGMM, fgGMM
+
+
+"""
+2.2 update GMMs(img, mask, bgdGMM, fgdGMM):
+In this method, you need to update the Gaussian Mixture Models (GMMs)
+for the foreground and background pixels based on the current mask. This step
+involves calculating the mean, covariance matrix and weights of each GMM component
+for the foreground and background pixels in the input image. You can
+use the cv2.calcCovarMatrix() (or np.conv) function to calculate the covariance
+matrix and mean values, respectively.
+After calculating the mean and covariance matrix, you need to update the
+GMMs using the formulae given in the GrabCut algorithm. You can refer to
+the following links for more information on this step: cv2.calcCovarMatrix.
+"""
 
 
 # Define helper functions for the GrabCut algorithm
+# this function takes the image, mask and the GMMs and returns the updated GMMs
 def update_GMMs(img, mask, bgGMM, fgGMM):
     # TODO: implement GMM component assignment step
+    bg_mask = (mask == GC_BGD) | (mask == GC_PR_BGD)  # bg_mask is True if the mask is either GC_BGD or GC_PR_BGD
+    fg_mask = (mask == GC_FGD) | (mask == GC_PR_FGD)  # fg_mask is True if the mask is either GC_FGD or GC_PR_FGD
+
+    # Get background and foreground pixels from the input image based on the mask
+    bg_data = img[bg_mask].reshape(-1, 3)
+    fg_data = img[fg_mask].reshape(-1, 3)
+
+    # Update background GMM
+    bg_n_components = bgGMM.n_components
+    bg_weights = np.zeros(bg_n_components)
+    bg_means = np.zeros((bg_n_components, 3))  # 3 is the number of channels ( RGB )
+    # the shape is (n_components, n_channels, n_channels) because the covariance matrix is a square matrix
+    bg_covs = np.zeros((bg_n_components, 3, 3))
+
+    # Iterate over the GMM components
+    # Calculate the mean and covariance of each component
+    # Update the GMM weights, means and covariances
+
+    for i in range(bg_n_components):
+        # Get the pixels that belong to the current component
+        component_mask = bgGMM.predict(bg_data) == i
+        # Extract the pixels that belong to the current component
+        component_data = bg_data[component_mask]
+
+        # Calculate the mean and covariance of the current component
+        # Update the GMM weights, means and covariances
+        if len(component_data) > 0:
+            # Calculate the weight of the current component by dividing the number of pixels in the component by the total number of pixels
+            bg_weights[i] = len(component_data) / len(bg_data)
+            # Calculate the mean and covariance of the current component using the cv2.calcCovarMatrix function
+            cov, mean = cv2.calcCovarMatrix(component_data, None, cv2.COVAR_NORMAL | cv2.COVAR_SCALE | cv2.COVAR_ROWS)
+            # Update the GMM weights, means and covariances
+            bg_means[i] = mean.flatten()
+            bg_covs[i] = cov
+
+    # Update the GMM weights, means and covariances
+    bgGMM.weights_ = bg_weights
+    bgGMM.means_ = bg_means
+    bgGMM.covariances_ = bg_covs
+
+    # Update foreground GMM ( same as the background GMM )
+    fg_n_components = fgGMM.n_components
+    fg_weights = np.zeros(fg_n_components)
+    fg_means = np.zeros((fg_n_components, 3))
+    fg_covs = np.zeros((fg_n_components, 3, 3))
+
+    for i in range(fg_n_components):
+        component_mask = fgGMM.predict(fg_data) == i
+        component_data = fg_data[component_mask]
+
+        if len(component_data) > 0:
+            fg_weights[i] = len(component_data) / len(fg_data)
+            cov, mean = cv2.calcCovarMatrix(component_data, None, cv2.COVAR_NORMAL | cv2.COVAR_SCALE | cv2.COVAR_ROWS)
+            fg_means[i] = mean.flatten()
+            fg_covs[i] = cov
+
+    fgGMM.weights_ = fg_weights
+    fgGMM.means_ = fg_means
+    fgGMM.covariances_ = fg_covs
+
     return bgGMM, fgGMM
 
 
+"""
+2.3 calculate mincut(img, mask, bgdGMM, fgdGMM):
+In this method you should build a graph based on the existing mask and the
+energy terms defined in the grabcut algorithm. Then a mincut should be used.
+The method should return the vertices (i.e. pixels) in each segment and the
+energy term corresponding to the cut. You are allowed to use any graph optimization
+library, for example igraph.
+"""
+
+
 def calculate_mincut(img, mask, bgGMM, fgGMM):
-    # TODO: implement energy (cost) calculation step and mincut
     min_cut = [[], []]
     energy = 0
-    return min_cut, energy
+    h, w = img.shape[:2]
+    img_indices = np.arange(h * w).reshape(h, w)
+    graph = ig.Graph()
+    graph.add_vertices(h * w + 2)
+    source = h * w
+    sink = h * w + 1
+
+    # Calculate data term
+    data_term = np.zeros((h, w, 2))
+    for i in range(h):
+        for j in range(w):
+            data_term[i, j, 0] = -np.log(np.max(bgGMM.predict_proba([img[i, j]])))  # Background
+            data_term[i, j, 1] = -np.log(np.max(fgGMM.predict_proba([img[i, j]])))  # Foreground
+
+    # Calculate smoothness term
+    # Calculate beta
+    beta = 1 / (2 * np.mean(np.sum((img[:-1, :] - img[1:, :]) ** 2, axis=2)))
+    gamma = 50
+
+    # Add edges to the graph
+    edges = []
+    weights = []
+    for i in range(h):
+        for j in range(w):
+            node1 = img_indices[i, j]
+            weight1 = data_term[i, j, 0]
+            edges.append((source, node1))
+            weights.append(weight1)
+
+            if i > 0:
+                node2 = img_indices[i - 1, j]
+                color_diff = np.sum((img[i, j] - img[i - 1, j]) ** 2)
+                edge_weight = gamma * np.exp(-beta * color_diff)
+                edges.append((node1, node2))
+                weights.append(edge_weight)
+
+            if j > 0:
+                node2 = img_indices[i, j - 1]
+                color_diff = np.sum((img[i, j] - img[i, j - 1]) ** 2)
+                edge_weight = gamma * np.exp(-beta * color_diff)
+                edges.append((node1, node2))
+                weights.append(edge_weight)
+
+            if i < h - 1:
+                node2 = img_indices[i + 1, j]
+                color_diff = np.sum((img[i, j] - img[i + 1, j]) ** 2)
+                edge_weight = gamma * np.exp(-beta * color_diff)
+                edges.append((node1, node2))
+                weights.append(edge_weight)
+
+            if j < w - 1:
+                node2 = img_indices[i, j + 1]
+                color_diff = np.sum((img[i, j] - img[i, j + 1]) ** 2)
+                edge_weight = gamma * np.exp(-beta * color_diff)
+                edges.append((node1, node2))
+                weights.append(edge_weight)
+
+            node2 = sink
+            weight2 = data_term[i, j, 1]
+            edges.append((node1, node2))
+            weights.append(weight2)
+
+    graph.add_edges(edges)
+    graph.es["weight"] = weights
+
+    mincut = graph.st_mincut(source, sink)
+    mincut_sets = [set(mincut.partition[0]), set(mincut.partition[1])]
+
+    return mincut_sets, mincut.value
+
+
+"""
+2.4 update mask(img, mask, mincut sets):
+In this method, you need to update the current mask based on the mincut and
+return a new mask.
+"""
 
 
 def update_mask(mincut_sets, mask):
-    # TODO: implement mask update step
-    return mask
+    h, w = mask.shape
+    img_indices = np.arange(h * w).reshape(h, w)
+    new_mask = np.copy(mask)
+    for i in range(h):
+        for j in range(w):
+            if img_indices[i, j] in mincut_sets[0]:  # If the pixel belongs to the background set
+                if new_mask[i, j] == GC_PR_BGD or new_mask[i, j] == GC_BGD:
+                    new_mask[i, j] = GC_BGD
+                else:
+                    new_mask[i, j] = GC_PR_BGD
+            else:  # If the pixel belongs to the foreground set
+                if new_mask[i, j] == GC_PR_FGD or new_mask[i, j] == GC_FGD:
+                    new_mask[i, j] = GC_FGD
+                else:
+                    new_mask[i, j] = GC_PR_FGD
+
+    return new_mask
+
+
+"""
+2.5 check convergence(energy):
+In this method, you need to check whether the energy value has converged to
+a stable minimum or not. You can use a threshold value to determine whether
+the energy has converged or not. If the energy has converged, you can return
+True, otherwise return False.
+"""
 
 
 def check_convergence(energy):
     # TODO: implement convergence check
     convergence = False
+    if energy < 0.1:
+        convergence = True
     return convergence
 
 
-def cal_metric(predicted_mask, gt_mask):
-    # TODO: implement metric calculation
+"""
+2.6 cal metric(mask, gt mask):
+In this method you will evaluate your segmentation results. Given two binary
+images, the method will return a tuple of the accuracy (the number of pixels
+that are correctly labeled divided by the total number of pixels in the image)
+and the Jaccard similarity (the intersection over the union of your predicted
+foreground region with the ground truth).
+"""
 
-    return 100, 100
+
+def cal_metric(predicted_mask, gt_mask):
+    # Convert masks to boolean arrays
+    predicted_mask_bool = predicted_mask.astype(bool)
+    gt_mask_bool = gt_mask.astype(bool)
+
+    # Calculate the number of correctly labeled pixels
+    correct_pixels = np.sum(predicted_mask_bool == gt_mask_bool)
+    total_pixels = predicted_mask.size
+
+    # Calculate the accuracy
+    accuracy = correct_pixels / total_pixels
+
+    # Calculate the Jaccard similarity
+    intersection = np.sum(predicted_mask_bool & gt_mask_bool)
+    union = np.sum(predicted_mask_bool | gt_mask_bool)
+    jaccard_similarity = intersection / union
+
+    return accuracy, jaccard_similarity
+
 
 def parse():
     parser = argparse.ArgumentParser()
@@ -83,10 +329,10 @@ def parse():
     parser.add_argument('--rect', type=str, default='1,1,100,100', help='if you wish change the rect (x,y,w,h')
     return parser.parse_args()
 
+
 if __name__ == '__main__':
     # Load an example image and define a bounding box around the object of interest
     args = parse()
-
 
     if args.input_img_path == '':
         input_path = f'data/imgs/{args.input_name}.jpg'
@@ -96,8 +342,7 @@ if __name__ == '__main__':
     if args.use_file_rect:
         rect = tuple(map(int, open(f"data/bboxes/{args.input_name}.txt", "r").read().split(' ')))
     else:
-        rect = tuple(map(int,args.rect.split(',')))
-
+        rect = tuple(map(int, args.rect.split(',')))
 
     img = cv2.imread(input_path)
 
