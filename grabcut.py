@@ -68,8 +68,10 @@ def initalize_GMMs(img, mask, n_components=5):
     fg_data = img[fg_mask].reshape(-1, 3)
 
     # Initialize with k-means clustering
-    bg_kmeans = KMeans(n_clusters=n_components).fit(bg_data)
-    fg_kmeans = KMeans(n_clusters=n_components).fit(fg_data)
+    bg_kmeans = KMeans(n_clusters=n_components)
+    bg_kmeans.fit(bg_data)
+    fg_kmeans = KMeans(n_clusters=n_components)
+    fg_kmeans.fit(fg_data)
 
     # Initialize GMMs with k-means cluster centers
     bgGMM = GaussianMixture(n_components=n_components, means_init=bg_kmeans.cluster_centers_)
@@ -182,12 +184,15 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
     source = h * w
     sink = h * w + 1
 
-    # Calculate data term
+    # Calculate data term (used to T-link)
     data_term = np.zeros((h, w, 2))
     for i in range(h):
         for j in range(w):
-            data_term[i, j, 0] = -np.log(np.max(bgGMM.predict_proba([img[i, j]])))  # Background
-            data_term[i, j, 1] = -np.log(np.max(fgGMM.predict_proba([img[i, j]])))  # Foreground
+            # Calculate the probability of the pixel belonging to the background and foreground
+            # (this calculates D(i, s) and D(i, t) in the GrabCut algorithm for each pixel,
+            # where (i, j) is the pixel and s and t are the source and sink nodes (background and foreground respectively))
+            data_term[i, j, 0] = -np.log(bgGMM.predict_proba(img[i, j]))
+            data_term[i, j, 1] = -np.log(fgGMM.predict_proba(img[i, j]))
 
     # Calculate smoothness term
     # Calculate beta
@@ -197,45 +202,105 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
     # Add edges to the graph
     edges = []
     weights = []
+
+    # calculate N-links
     for i in range(h):
         for j in range(w):
+            # calculate K value for each pixel by holding the maximum of all N-links that are connected to the pixel
+            # (used to T-link, but calulated as the maximum of all N-links that are connected to the pixel)
+            k = 0
+            # set the node index of the current pixel
             node1 = img_indices[i, j]
-            weight1 = data_term[i, j, 0]
-            edges.append((source, node1))
-            weights.append(weight1)
 
+            # Calculate edge weight for top neighbor
             if i > 0:
                 node2 = img_indices[i - 1, j]
                 color_diff = np.sum((img[i, j] - img[i - 1, j]) ** 2)
                 edge_weight = gamma * np.exp(-beta * color_diff)
                 edges.append((node1, node2))
                 weights.append(edge_weight)
+                k = max(k, edge_weight)
 
+            # Calculate edge weight for left neighbor
             if j > 0:
                 node2 = img_indices[i, j - 1]
                 color_diff = np.sum((img[i, j] - img[i, j - 1]) ** 2)
                 edge_weight = gamma * np.exp(-beta * color_diff)
                 edges.append((node1, node2))
                 weights.append(edge_weight)
+                k = max(k, edge_weight)
 
+            # Calculate edge weight for bottom neighbor
             if i < h - 1:
                 node2 = img_indices[i + 1, j]
                 color_diff = np.sum((img[i, j] - img[i + 1, j]) ** 2)
                 edge_weight = gamma * np.exp(-beta * color_diff)
                 edges.append((node1, node2))
                 weights.append(edge_weight)
+                k = max(k, edge_weight)
 
+            # Calculate edge weight for right neighbor
             if j < w - 1:
                 node2 = img_indices[i, j + 1]
                 color_diff = np.sum((img[i, j] - img[i, j + 1]) ** 2)
                 edge_weight = gamma * np.exp(-beta * color_diff)
                 edges.append((node1, node2))
                 weights.append(edge_weight)
+                k = max(k, edge_weight)
 
-            node2 = sink
-            weight2 = data_term[i, j, 1]
-            edges.append((node1, node2))
-            weights.append(weight2)
+            # calculate edge weight for top left neighbor
+            if i > 0 and j > 0:
+                node2 = img_indices[i - 1, j - 1]
+                color_diff = np.sum((img[i, j] - img[i - 1, j - 1]) ** 2)
+                edge_weight = gamma * np.exp(-beta * color_diff)
+                edges.append((node1, node2))
+                weights.append(edge_weight)
+                k = max(k, edge_weight)
+
+            # calculate edge weight for top right neighbor
+            if i > 0 and j < w - 1:
+                node2 = img_indices[i - 1, j + 1]
+                color_diff = np.sum((img[i, j] - img[i - 1, j + 1]) ** 2)
+                edge_weight = gamma * np.exp(-beta * color_diff)
+                edges.append((node1, node2))
+                weights.append(edge_weight)
+                k = max(k, edge_weight)
+
+            # calculate edge weight for bottom left neighbor
+            if i < h - 1 and j > 0:
+                node2 = img_indices[i + 1, j - 1]
+                color_diff = np.sum((img[i, j] - img[i + 1, j - 1]) ** 2)
+                edge_weight = gamma * np.exp(-beta * color_diff)
+                edges.append((node1, node2))
+                weights.append(edge_weight)
+                k = max(k, edge_weight)
+
+            # calculate edge weight for bottom right neighbor
+            if i < h - 1 and j < w - 1:
+                node2 = img_indices[i + 1, j + 1]
+                color_diff = np.sum((img[i, j] - img[i + 1, j + 1]) ** 2)
+                edge_weight = gamma * np.exp(-beta * color_diff)
+                edges.append((node1, node2))
+                weights.append(edge_weight)
+                k = max(k, edge_weight)
+
+    # get the value of Dback for the current pixel
+    Dback = data_term[i, j, 0]
+    # get the value of Dfore for the current pixel
+    Dfore = data_term[i, j, 1]
+    edges.append((source, node1))
+    edges.append((node1, sink))
+
+    # check if the current pixel is a background pixel or a foreground pixel using the mask
+    if mask[i, j] == GC_PR_FGD or mask[i, j] == GC_PR_BGD:
+        weights.append(Dfore)
+        weights.append(Dback)
+    if mask[i, j] == GC_FGD:
+        weights.append(0)
+        weights.append(k)
+    if mask[i, j] == GC_BGD:
+        weights.append(k)
+        weights.append(0)
 
     graph.add_edges(edges)
     graph.es["weight"] = weights
