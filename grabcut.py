@@ -18,6 +18,11 @@ def grabcut(img, rect, n_iter=5):
     mask.fill(GC_BGD)
     x, y, w, h = rect
 
+    # this is a suggested fix from whatsapp****
+    w -= x
+    h -= y
+    # ***************************************
+
     # Initalize the inner square to Foreground
     mask[y:y + h, x:x + w] = GC_PR_FGD
     mask[rect[1] + rect[3] // 2, rect[0] + rect[2] // 2] = GC_FGD
@@ -107,6 +112,15 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
     # Get background and foreground pixels from the input image based on the mask
     bg_data = img[bg_mask].reshape(-1, 3)
     fg_data = img[fg_mask].reshape(-1, 3)
+    print("foreground: ")
+    print(fg_data)
+    print("size of bg_data: " + str(bg_data.shape))
+    print("size of fg_data: " + str(fg_data.shape))
+    print("size of mask: " + str(mask.shape))
+    print("number of 0s in mask: " + str(np.count_nonzero(mask == 0)))
+    print("number of 1s in mask: " + str(np.count_nonzero(mask == 1)))
+    print("number of 2s in mask: " + str(np.count_nonzero(mask == 2)))
+    print("number of 3s in mask: " + str(np.count_nonzero(mask == 3)))
 
     # Update background GMM
     bg_n_components = bgGMM.n_components
@@ -161,6 +175,11 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
     fgGMM.means_ = fg_means
     fgGMM.covariances_ = fg_covs
 
+    print("bgGMM weights: ")
+    print(bgGMM.weights_)
+    print("fgGMM weights: ")
+    print(fgGMM.weights_)
+
     return bgGMM, fgGMM
 
 
@@ -191,12 +210,16 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
             # Calculate the probability of the pixel belonging to the background and foreground
             # (this calculates D(i, s) and D(i, t) in the GrabCut algorithm for each pixel,
             # where (i, j) is the pixel and s and t are the source and sink nodes (background and foreground respectively))
-            data_term[i, j, 0] = -np.log(bgGMM.predict_proba(img[i, j]))
-            data_term[i, j, 1] = -np.log(fgGMM.predict_proba(img[i, j]))
+            data_term[i, j, 0] = -bgGMM.score_samples(img[i, j].reshape(1, -1))
+            data_term[i, j, 1] = -fgGMM.score_samples(img[i, j].reshape(1, -1))
+
+    print("data_term: ")
+    print(data_term)
 
     # Calculate smoothness term
     # Calculate beta
-    beta = 1 / (2 * np.mean(np.sum((img[:-1, :] - img[1:, :]) ** 2, axis=2)))
+    # beta = 1 / (2 * np.mean(np.sum((img[:-1, :] - img[1:, :]) ** 2, axis=2)))
+    beta = 0
     gamma = 50
 
     # Add edges to the graph
@@ -304,9 +327,12 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
 
     graph.add_edges(edges)
     graph.es["weight"] = weights
+    print("number of edges: ", len(graph.es))
 
     mincut = graph.st_mincut(source, sink)
     mincut_sets = [set(mincut.partition[0]), set(mincut.partition[1])]
+    print("mincut source set size: ", len(mincut_sets[0]))
+    print("mincut sink set size: ", len(mincut_sets[1]))
 
     return mincut_sets, mincut.value
 
@@ -324,18 +350,14 @@ def update_mask(mincut_sets, mask):
     new_mask = np.copy(mask)
     for i in range(h):
         for j in range(w):
-            if img_indices[i, j] in mincut_sets[0]:  # If the pixel belongs to the background set
-                if new_mask[i, j] == GC_PR_BGD or new_mask[i, j] == GC_BGD:
-                    new_mask[i, j] = GC_BGD
-                else:
-                    new_mask[i, j] = GC_PR_BGD
-            else:  # If the pixel belongs to the foreground set
-                if new_mask[i, j] == GC_PR_FGD or new_mask[i, j] == GC_FGD:
-                    new_mask[i, j] = GC_FGD
-                else:
-                    new_mask[i, j] = GC_PR_FGD
+            if img_indices[i, j] in mincut_sets[0] and (mask[i, j] == GC_PR_FGD or mask[i, j] == GC_PR_BGD):
+                new_mask[i, j] = GC_PR_BGD
+            elif img_indices[i, j] in mincut_sets[1] and (mask[i, j] == GC_PR_FGD or mask[i, j] == GC_PR_BGD):
+                new_mask[i, j] = GC_PR_FGD
 
-    return new_mask
+    mask = np.copy(new_mask)
+
+    return mask
 
 
 """
