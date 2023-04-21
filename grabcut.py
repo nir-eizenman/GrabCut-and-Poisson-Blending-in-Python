@@ -284,23 +284,23 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
                 weights.append(edge_weight)
                 k = max(k, edge_weight)
 
-    # get the value of Dback for the current pixel
-    Dback = data_term[i, j, 0]
-    # get the value of Dfore for the current pixel
-    Dfore = data_term[i, j, 1]
-    edges.append((source, node1))
-    edges.append((node1, sink))
+            # get the value of Dback for the current pixel
+            Dback = data_term[i, j, 0]
+            # get the value of Dfore for the current pixel
+            Dfore = data_term[i, j, 1]
+            edges.append((source, node1))
+            edges.append((node1, sink))
 
-    # check if the current pixel is a background pixel or a foreground pixel using the mask
-    if mask[i, j] == GC_PR_FGD or mask[i, j] == GC_PR_BGD:
-        weights.append(Dfore)
-        weights.append(Dback)
-    if mask[i, j] == GC_FGD:
-        weights.append(0)
-        weights.append(k)
-    if mask[i, j] == GC_BGD:
-        weights.append(k)
-        weights.append(0)
+            # check if the current pixel is a background pixel or a foreground pixel using the mask
+            if mask[i, j] == GC_PR_FGD or mask[i, j] == GC_PR_BGD:
+                weights.append(Dfore)
+                weights.append(Dback)
+            if mask[i, j] == GC_FGD:
+                weights.append(0)
+                weights.append(k)
+            if mask[i, j] == GC_BGD:
+                weights.append(k)
+                weights.append(0)
 
     graph.add_edges(edges)
     graph.es["weight"] = weights
