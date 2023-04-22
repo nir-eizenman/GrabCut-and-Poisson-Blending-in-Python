@@ -73,16 +73,16 @@ def initalize_GMMs(img, mask, n_components=5):
     fg_data = img[fg_mask].reshape(-1, 3)
 
     # Initialize with k-means clustering
-    bg_kmeans = KMeans(n_clusters=n_components)
+    bg_kmeans = KMeans(n_clusters=n_components, random_state=0)
     bg_kmeans.fit(bg_data)
-    fg_kmeans = KMeans(n_clusters=n_components)
+    fg_kmeans = KMeans(n_clusters=n_components, random_state=0)
     fg_kmeans.fit(fg_data)
 
     # Initialize GMMs with k-means cluster centers
-    bgGMM = GaussianMixture(n_components=n_components, means_init=bg_kmeans.cluster_centers_)
+    bgGMM = GaussianMixture(n_components=n_components, means_init=bg_kmeans.cluster_centers_, random_state=0)
     bgGMM.fit(bg_data)
 
-    fgGMM = GaussianMixture(n_components=n_components, means_init=fg_kmeans.cluster_centers_)
+    fgGMM = GaussianMixture(n_components=n_components, means_init=fg_kmeans.cluster_centers_, random_state=0)
     fgGMM.fit(fg_data)
 
     return bgGMM, fgGMM
@@ -187,7 +187,6 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
     print(fgGMM.means_)
     print("fgGMM covs: ")
     print(fgGMM.covariances_)
-
 
     return bgGMM, fgGMM
 
