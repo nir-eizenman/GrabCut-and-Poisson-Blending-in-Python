@@ -5,6 +5,8 @@ from sklearn.mixture import GaussianMixture
 from sklearn.cluster import KMeans
 import igraph as ig
 
+import time
+
 GC_BGD = 0  # Hard bg pixel
 GC_FGD = 1  # Hard fg pixel, will not be used
 GC_PR_BGD = 2  # Soft bg pixel
@@ -13,6 +15,12 @@ GC_PR_FGD = 3  # Soft fg pixel
 
 # Define the GrabCut algorithm function
 def grabcut(img, rect, n_iter=5):
+    str_time = time.time()
+
+    # ********* This is a suggested fix from whatsapp *********
+    img = np.asarray(img, dtype=np.float64)
+    # *********************************************************
+
     # Assign initial labels to the pixels based on the bounding box
     mask = np.zeros(img.shape[:2], dtype=np.uint8)
     mask.fill(GC_BGD)
@@ -27,25 +35,38 @@ def grabcut(img, rect, n_iter=5):
     mask[y:y + h, x:x + w] = GC_PR_FGD
     mask[rect[1] + rect[3] // 2, rect[0] + rect[2] // 2] = GC_FGD
 
+    init_str_time = time.time()
     bgGMM, fgGMM = initalize_GMMs(img, mask)
+    print("Time to initialize GMMs: " + str(time.time() - init_str_time))
 
     num_iters = 1000
     for i in range(num_iters):
         # Update GMM
+        iter_str_time = time.time()
+
         print("Iteration: " + str(i) + " before updating GMMs")
+        update_str_time = time.time()
         bgGMM, fgGMM = update_GMMs(img, mask, bgGMM, fgGMM)
+        print("Time to update GMMs: " + str(time.time() - update_str_time))
         print("Iteration: " + str(i) + " after updating GMMs")
 
+        min_cut_str_time = time.time()
         mincut_sets, energy = calculate_mincut(img, mask, bgGMM, fgGMM)
+        print("Time to calculate mincut: " + str(time.time() - min_cut_str_time))
 
         print("Iteration: " + str(i) + " after calculating mincut, energy is: " + str(energy))
+        update_mask_str_time = time.time()
         mask = update_mask(mincut_sets, mask)
+        print("Time to update mask: " + str(time.time() - update_mask_str_time))
         print("Iteration: " + str(i) + " after updating mask")
+        print("Time to complete iteration: " + str(time.time() - iter_str_time))
 
-        if check_convergence(energy):
+        if check_convergence(mask, energy, i):
             break
 
     # Return the final mask and the GMMs
+    print("Total time: " + str(time.time() - str_time))
+
     return mask, bgGMM, fgGMM
 
 
@@ -62,29 +83,24 @@ grabcut algorithm.
 
 def initalize_GMMs(img, mask, n_components=5):
     # TODO: implement initalize_GMMs
-
+    # print("\n*** Welcome to Initalize ***\n")
     # Extract the foreground and background pixels from the mask
-    bg_mask = (mask == GC_BGD) | (mask == GC_PR_BGD)  # bg_mask is True if the mask is either GC_BGD or GC_PR_BGD
-    fg_mask = (mask == GC_FGD) | (mask == GC_PR_FGD)  # fg_mask is True if the mask is either GC_FGD or GC_PR_FGD
-
-    # Reshape the image to a 2D array of pixels and 3 color values (RGB) (separate foreground and background pixels)
-    # from a shape of (rows, cols, 3) to (rows*cols, 3)
-    bg_data = img[bg_mask].reshape(-1, 3)
-    fg_data = img[fg_mask].reshape(-1, 3)
+    fg_data = img[np.logical_or(mask == GC_PR_FGD, mask == GC_FGD)].reshape(-1, 3)
+    bg_data = img[np.logical_or(mask == GC_PR_BGD, mask == GC_BGD)].reshape(-1, 3)
 
     # Initialize with k-means clustering
-    bg_kmeans = KMeans(n_clusters=n_components, random_state=0)
+    bg_kmeans = KMeans(n_clusters=n_components, random_state=None)
     bg_kmeans.fit(bg_data)
-    fg_kmeans = KMeans(n_clusters=n_components, random_state=0)
+    fg_kmeans = KMeans(n_clusters=n_components, random_state=None)
     fg_kmeans.fit(fg_data)
 
     # Initialize GMMs with k-means cluster centers
-    bgGMM = GaussianMixture(n_components=n_components, means_init=bg_kmeans.cluster_centers_, random_state=0)
+    bgGMM = GaussianMixture(n_components=n_components, means_init=bg_kmeans.cluster_centers_, random_state=None)
     bgGMM.fit(bg_data)
 
-    fgGMM = GaussianMixture(n_components=n_components, means_init=fg_kmeans.cluster_centers_, random_state=0)
+    fgGMM = GaussianMixture(n_components=n_components, means_init=fg_kmeans.cluster_centers_, random_state=None)
     fgGMM.fit(fg_data)
-
+    # print("\n*** goodbye from Initalize ***")
     return bgGMM, fgGMM
 
 
@@ -106,28 +122,22 @@ the following links for more information on this step: cv2.calcCovarMatrix.
 # this function takes the image, mask and the GMMs and returns the updated GMMs
 def update_GMMs(img, mask, bgGMM, fgGMM):
     # TODO: implement GMM component assignment step
-    bg_mask = (mask == GC_BGD) | (mask == GC_PR_BGD)  # bg_mask is True if the mask is either GC_BGD or GC_PR_BGD
-    fg_mask = (mask == GC_FGD) | (mask == GC_PR_FGD)  # fg_mask is True if the mask is either GC_FGD or GC_PR_FGD
+    fg_data = img[np.logical_or(mask == GC_PR_FGD, mask == GC_FGD)].reshape(-1, 3)
+    bg_data = img[np.logical_or(mask == GC_PR_BGD, mask == GC_BGD)].reshape(-1, 3)
 
-    # Get background and foreground pixels from the input image based on the mask
-    bg_data = img[bg_mask].reshape(-1, 3)
-    fg_data = img[fg_mask].reshape(-1, 3)
-    print("foreground: ")
-    print(fg_data)
     print("size of bg_data: " + str(bg_data.shape))
     print("size of fg_data: " + str(fg_data.shape))
-    print("size of mask: " + str(mask.shape))
     print("number of 0s in mask: " + str(np.count_nonzero(mask == 0)))
     print("number of 1s in mask: " + str(np.count_nonzero(mask == 1)))
     print("number of 2s in mask: " + str(np.count_nonzero(mask == 2)))
     print("number of 3s in mask: " + str(np.count_nonzero(mask == 3)))
 
-    # Update background GMM
+    # Initialize background GMM
     bg_n_components = bgGMM.n_components
     bg_weights = np.zeros(bg_n_components)
     bg_means = np.zeros((bg_n_components, 3))  # 3 is the number of channels ( RGB )
-    # the shape is (n_components, n_channels, n_channels) because the covariance matrix is a square matrix
-    bg_covs = np.zeros((bg_n_components, 3, 3))
+    bg_covs = np.zeros((bg_n_components, 3,
+                        3))  # the shape is (n_components, n_channels, n_channels) because the covariance matrix is a square matrix
 
     # Iterate over the GMM components
     # Calculate the mean and covariance of each component
@@ -175,18 +185,20 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
     fgGMM.means_ = fg_means
     fgGMM.covariances_ = fg_covs
 
-    print("bgGMM weights: ")
-    print(bgGMM.weights_)
-    print("bgGMM means: ")
-    print(bgGMM.means_)
-    print("bgGMM covs: ")
-    print(bgGMM.covariances_)
-    print("fgGMM weights: ")
-    print(fgGMM.weights_)
-    print("fgGMM means: ")
-    print(fgGMM.means_)
-    print("fgGMM covs: ")
-    print(fgGMM.covariances_)
+    # print("Printing values after the calculations: \n")
+    # print("bgGMM weights: ")
+    # print(bgGMM.weights_)
+    # print("bgGMM means: ")
+    # print(bgGMM.means_)
+    # print("bgGMM covs: ")
+    # print(bgGMM.covariances_)
+    #
+    # print("\n fgGMM weights: ")
+    # print(fgGMM.weights_)
+    # print("fgGMM means: ")
+    # print(fgGMM.means_)
+    # print("fgGMM covs: ")
+    # print(fgGMM.covariances_)
 
     return bgGMM, fgGMM
 
@@ -211,6 +223,8 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
     source = h * w
     sink = h * w + 1
 
+    dt_time = time.time()
+
     # Calculate data term (used to T-link)
     data_term = np.zeros((h, w, 2))
     for i in range(h):
@@ -225,8 +239,9 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
             # maybe K is actually the number of components in the GMM
             # ***********************
 
-    print("data_term: ")
-    print(data_term)
+    print("data_term time: ", time.time() - dt_time)
+    # print("data_term: ")
+    # print(data_term)
 
     gamma = 50
 
@@ -234,6 +249,8 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
     # calculate beta by summing the Euclidean distance between each pixel (its color vector) and his 8 neighbors
     # and then dividing the sum by the number of pixels, and then multiplying the result by 2 and then taking the inverse
     beta = 0
+
+    beta_time = time.time()
 
     for i in range(h):
         for j in range(w):
@@ -263,12 +280,16 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
     beta = 2 * beta
     beta = 1 / beta
 
-    print("beta: ")
-    print(beta)
+    print("beta time: ", time.time() - beta_time)
+
+    # print("beta: ")
+    # print(beta)
 
     # Add edges to the graph
     edges = []
     weights = []
+
+    graph_time = time.time()
 
     # calculate N-links
     for i in range(h):
@@ -389,11 +410,21 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
                 weights.append(k)
                 weights.append(0)
 
-    graph.add_edges(edges)
-    graph.es["weight"] = weights
-    print("number of edges: ", len(graph.es))
+    print("time taken to create graph: ", time.time() - graph_time)
 
-    mincut = graph.st_mincut(source, sink)
+    add_edges_time = time.time()
+
+    graph.add_edges(edges, {'weight': weights})
+
+    print("time taken to add edges: ", time.time() - add_edges_time)
+
+    # graph.es["weight"] = weights
+    # print("number of edges: ", len(graph.es))
+
+    min_cut_time = time.time()
+
+    mincut = graph.st_mincut(source, sink, capacity='weight')
+    print("time taken to calculate mincut: ", time.time() - min_cut_time)
     mincut_sets = [set(mincut.partition[0]), set(mincut.partition[1])]
     print("mincut source set size: ", len(mincut_sets[0]))
     print("mincut sink set size: ", len(mincut_sets[1]))
@@ -433,10 +464,12 @@ True, otherwise return False.
 """
 
 
-def check_convergence(energy):
+def check_convergence(mask, energy, iteration):
     # TODO: implement convergence check
     convergence = False
-    if energy < 0.1:
+    if iteration >= 3:
+        # change all soft background pixels to background pixels
+        mask[mask == GC_PR_BGD] = GC_BGD
         convergence = True
     return convergence
 
