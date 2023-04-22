@@ -227,14 +227,22 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
         for j in range(w):
             # calculate the Euclidean distance between the current pixel and its 8 neighbors
             # and then sum the distances
-            beta += np.linalg.norm(img[i, j] - img[i - 1, j]) ** 2
-            beta += np.linalg.norm(img[i, j] - img[i + 1, j]) ** 2
-            beta += np.linalg.norm(img[i, j] - img[i, j - 1]) ** 2
-            beta += np.linalg.norm(img[i, j] - img[i, j + 1]) ** 2
-            beta += np.linalg.norm(img[i, j] - img[i - 1, j - 1]) ** 2
-            beta += np.linalg.norm(img[i, j] - img[i - 1, j + 1]) ** 2
-            beta += np.linalg.norm(img[i, j] - img[i + 1, j - 1]) ** 2
-            beta += np.linalg.norm(img[i, j] - img[i + 1, j + 1]) ** 2
+            if i > 0:
+                beta += np.linalg.norm(img[i, j] - img[i - 1, j]) ** 2
+            if i < h - 1:
+                beta += np.linalg.norm(img[i, j] - img[i + 1, j]) ** 2
+            if j > 0:
+                beta += np.linalg.norm(img[i, j] - img[i, j - 1]) ** 2
+            if j < w - 1:
+                beta += np.linalg.norm(img[i, j] - img[i, j + 1]) ** 2
+            if i > 0 and j > 0:
+                beta += np.linalg.norm(img[i, j] - img[i - 1, j - 1]) ** 2
+            if i > 0 and j < w - 1:
+                beta += np.linalg.norm(img[i, j] - img[i - 1, j + 1]) ** 2
+            if i < h - 1 and j > 0:
+                beta += np.linalg.norm(img[i, j] - img[i + 1, j - 1]) ** 2
+            if i < h - 1 and j < w - 1:
+                beta += np.linalg.norm(img[i, j] - img[i + 1, j + 1]) ** 2
 
     # calculate the number of pixels
     num_pixels = h * w
@@ -242,6 +250,9 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
     beta = beta / num_pixels
     beta = 2 * beta
     beta = 1 / beta
+
+    print("beta: ")
+    print(beta)
 
     # Add edges to the graph
     edges = []
