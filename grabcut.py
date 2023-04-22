@@ -247,7 +247,7 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
     # calculate the number of pixels
     num_pixels = h * w
     # calculate beta by dividing the sum of the distances by the number of pixels, and then multiplying the result by 2 and then taking the inverse
-    beta = beta / num_pixels
+    beta = beta / ((num_pixels * 8) - (h * 2 + w * 2 + 4))
     beta = 2 * beta
     beta = 1 / beta
 
