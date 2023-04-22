@@ -177,8 +177,17 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
 
     print("bgGMM weights: ")
     print(bgGMM.weights_)
+    print("bgGMM means: ")
+    print(bgGMM.means_)
+    print("bgGMM covs: ")
+    print(bgGMM.covariances_)
     print("fgGMM weights: ")
     print(fgGMM.weights_)
+    print("fgGMM means: ")
+    print(fgGMM.means_)
+    print("fgGMM covs: ")
+    print(fgGMM.covariances_)
+
 
     return bgGMM, fgGMM
 
@@ -210,8 +219,12 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
             # Calculate the probability of the pixel belonging to the background and foreground
             # (this calculates D(i, s) and D(i, t) in the GrabCut algorithm for each pixel,
             # where (i, j) is the pixel and s and t are the source and sink nodes (background and foreground respectively))
-            data_term[i, j, 0] = -bgGMM.score_samples(img[i, j].reshape(1, -1))
-            data_term[i, j, 1] = -fgGMM.score_samples(img[i, j].reshape(1, -1))
+            data_term[i, j, 0] = -bgGMM.score(img[i, j].reshape(1, -1))
+            data_term[i, j, 1] = -fgGMM.score(img[i, j].reshape(1, -1))
+
+            # ***********************
+            # maybe K is actually the number of components in the GMM
+            # ***********************
 
     print("data_term: ")
     print(data_term)
