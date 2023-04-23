@@ -11,10 +11,13 @@ GC_BGD = 0  # Hard bg pixel
 GC_FGD = 1  # Hard fg pixel, will not be used
 GC_PR_BGD = 2  # Soft bg pixel
 GC_PR_FGD = 3  # Soft fg pixel
+mask = []
 
 
 # Define the GrabCut algorithm function
 def grabcut(img, rect, n_iter=5):
+    global mask
+    previous_energy = 0
     str_time = time.time()
 
     # ********* This is a suggested fix from whatsapp *********
@@ -35,34 +38,26 @@ def grabcut(img, rect, n_iter=5):
     mask[y:y + h, x:x + w] = GC_PR_FGD
     mask[rect[1] + rect[3] // 2, rect[0] + rect[2] // 2] = GC_FGD
 
-    init_str_time = time.time()
     bgGMM, fgGMM = initalize_GMMs(img, mask)
-    print("Time to initialize GMMs: " + str(time.time() - init_str_time))
 
     num_iters = 1000
     for i in range(num_iters):
         # Update GMM
         iter_str_time = time.time()
 
-        print("Iteration: " + str(i) + " before updating GMMs")
-        update_str_time = time.time()
         bgGMM, fgGMM = update_GMMs(img, mask, bgGMM, fgGMM)
-        print("Time to update GMMs: " + str(time.time() - update_str_time))
-        print("Iteration: " + str(i) + " after updating GMMs")
 
-        min_cut_str_time = time.time()
         mincut_sets, energy = calculate_mincut(img, mask, bgGMM, fgGMM)
-        print("Time to calculate mincut: " + str(time.time() - min_cut_str_time))
 
         print("Iteration: " + str(i) + " after calculating mincut, energy is: " + str(energy))
-        update_mask_str_time = time.time()
         mask = update_mask(mincut_sets, mask)
-        print("Time to update mask: " + str(time.time() - update_mask_str_time))
-        print("Iteration: " + str(i) + " after updating mask")
-        print("Time to complete iteration: " + str(time.time() - iter_str_time))
+        print("diff: " + str(np.abs(energy - previous_energy)))
+        print("Time to complete iteration: " + str(time.time() - iter_str_time) + "\n")
 
-        if check_convergence(mask, energy, i):
+        if check_convergence(np.abs(energy - previous_energy)):
+            print("iterations to convergence: " + str(i + 1))
             break
+        previous_energy = energy
 
     # Return the final mask and the GMMs
     print("Total time: " + str(time.time() - str_time))
@@ -81,7 +76,7 @@ grabcut algorithm.
 """
 
 
-def initalize_GMMs(img, mask, n_components=5):
+def initalize_GMMs(img, mask, n_components=1):
     # TODO: implement initalize_GMMs
     # print("\n*** Welcome to Initalize ***\n")
     # Extract the foreground and background pixels from the mask
@@ -125,19 +120,19 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
     fg_data = img[np.logical_or(mask == GC_PR_FGD, mask == GC_FGD)].reshape(-1, 3)
     bg_data = img[np.logical_or(mask == GC_PR_BGD, mask == GC_BGD)].reshape(-1, 3)
 
-    print("size of bg_data: " + str(bg_data.shape))
-    print("size of fg_data: " + str(fg_data.shape))
-    print("number of 0s in mask: " + str(np.count_nonzero(mask == 0)))
-    print("number of 1s in mask: " + str(np.count_nonzero(mask == 1)))
-    print("number of 2s in mask: " + str(np.count_nonzero(mask == 2)))
-    print("number of 3s in mask: " + str(np.count_nonzero(mask == 3)))
+    # print("size of bg_data: " + str(bg_data.shape))
+    # print("size of fg_data: " + str(fg_data.shape))
+    # print("number of 0s in mask: " + str(np.count_nonzero(mask == 0)))
+    # print("number of 1s in mask: " + str(np.count_nonzero(mask == 1)))
+    # print("number of 2s in mask: " + str(np.count_nonzero(mask == 2)))
+    # print("number of 3s in mask: " + str(np.count_nonzero(mask == 3)))
 
     # Initialize background GMM
     bg_n_components = bgGMM.n_components
     bg_weights = np.zeros(bg_n_components)
     bg_means = np.zeros((bg_n_components, 3))  # 3 is the number of channels ( RGB )
-    bg_covs = np.zeros((bg_n_components, 3,
-                        3))  # the shape is (n_components, n_channels, n_channels) because the covariance matrix is a square matrix
+    bg_covs = np.zeros((bg_n_components, 3, 3))
+    # the shape is (n_components, n_channels, n_channels) because the covariance matrix is a square matrix
 
     # Iterate over the GMM components
     # Calculate the mean and covariance of each component
@@ -250,8 +245,6 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
     # and then dividing the sum by the number of pixels, and then multiplying the result by 2 and then taking the inverse
     beta = 0
 
-    beta_time = time.time()
-
     for i in range(h):
         for j in range(w):
             # calculate the Euclidean distance between the current pixel and its 8 neighbors
@@ -280,16 +273,12 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
     beta = 2 * beta
     beta = 1 / beta
 
-    print("beta time: ", time.time() - beta_time)
-
     # print("beta: ")
     # print(beta)
 
     # Add edges to the graph
     edges = []
     weights = []
-
-    graph_time = time.time()
 
     # calculate N-links
     for i in range(h):
@@ -410,13 +399,7 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
                 weights.append(k)
                 weights.append(0)
 
-    print("time taken to create graph: ", time.time() - graph_time)
-
-    add_edges_time = time.time()
-
     graph.add_edges(edges, {'weight': weights})
-
-    print("time taken to add edges: ", time.time() - add_edges_time)
 
     # graph.es["weight"] = weights
     # print("number of edges: ", len(graph.es))
@@ -464,10 +447,11 @@ True, otherwise return False.
 """
 
 
-def check_convergence(mask, energy, iteration):
+def check_convergence(energy):
+    global mask
     # TODO: implement convergence check
     convergence = False
-    if iteration >= 3:
+    if energy <= 1:
         # change all soft background pixels to background pixels
         mask[mask == GC_PR_BGD] = GC_BGD
         convergence = True
