@@ -49,10 +49,10 @@ def grabcut(img, rect, n_iter=5):
 
         mincut_sets, energy = calculate_mincut(img, mask, bgGMM, fgGMM)
 
-        print("Iteration: " + str(i) + " after calculating mincut, energy is: " + str(energy))
+        print("Iteration: " + str(i + 1) + " after calculating mincut, energy is: " + str(energy))
         mask = update_mask(mincut_sets, mask)
-        print("diff: " + str(np.abs(energy - previous_energy)))
-        print("Time to complete iteration: " + str(time.time() - iter_str_time) + "\n")
+        print("difference between energies: " + str(np.abs(energy - previous_energy)))
+        print("Time to complete iteration: " + str(round(time.time() - iter_str_time, 2)) + " seconds\n")
 
         if check_convergence(np.abs(energy - previous_energy)):
             print("iterations to convergence: " + str(i + 1))
@@ -60,7 +60,7 @@ def grabcut(img, rect, n_iter=5):
         previous_energy = energy
 
     # Return the final mask and the GMMs
-    print("Total time: " + str(time.time() - str_time))
+    print("Total time: " + str(round((time.time() - str_time) / 60, 2)) + " minutes")
 
     return mask, bgGMM, fgGMM
 
@@ -76,7 +76,7 @@ grabcut algorithm.
 """
 
 
-def initalize_GMMs(img, mask, n_components=1):
+def initalize_GMMs(img, mask, n_components=5):
     # TODO: implement initalize_GMMs
     # print("\n*** Welcome to Initalize ***\n")
     # Extract the foreground and background pixels from the mask
@@ -181,19 +181,27 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
     fgGMM.covariances_ = fg_covs
 
     # print("Printing values after the calculations: \n")
-    # print("bgGMM weights: ")
+    print("bgGMM weights: " + str(bgGMM.weights_))
     # print(bgGMM.weights_)
     # print("bgGMM means: ")
     # print(bgGMM.means_)
     # print("bgGMM covs: ")
     # print(bgGMM.covariances_)
     #
-    # print("\n fgGMM weights: ")
+    print("fgGMM weights: " + str(fgGMM.weights_))
     # print(fgGMM.weights_)
     # print("fgGMM means: ")
     # print(fgGMM.means_)
     # print("fgGMM covs: ")
     # print(fgGMM.covariances_)
+    for i in bgGMM.weights_:
+        if i <= 0.000001:
+            print("bgGMM weights: " + str(bgGMM.weights_))
+            exit(0)
+    for i in fgGMM.weights_:
+        if i <= 0.000001:
+            print("fgGMM weights: " + str(fgGMM.weights_))
+            exit(0)
 
     return bgGMM, fgGMM
 
@@ -218,7 +226,7 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
     source = h * w
     sink = h * w + 1
 
-    dt_time = time.time()
+    # dt_time = time.time()
 
     # Calculate data term (used to T-link)
     data_term = np.zeros((h, w, 2))
@@ -234,7 +242,7 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
             # maybe K is actually the number of components in the GMM
             # ***********************
 
-    print("data_term time: ", time.time() - dt_time)
+    # print("data_term time: ", time.time() - dt_time)
     # print("data_term: ")
     # print(data_term)
 
@@ -404,13 +412,13 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
     # graph.es["weight"] = weights
     # print("number of edges: ", len(graph.es))
 
-    min_cut_time = time.time()
+    # min_cut_time = time.time()
 
     mincut = graph.st_mincut(source, sink, capacity='weight')
-    print("time taken to calculate mincut: ", time.time() - min_cut_time)
+    # print("time taken to calculate mincut: ", time.time() - min_cut_time)
     mincut_sets = [set(mincut.partition[0]), set(mincut.partition[1])]
-    print("mincut source set size: ", len(mincut_sets[0]))
-    print("mincut sink set size: ", len(mincut_sets[1]))
+    # print("mincut source set size: ", len(mincut_sets[0]))
+    # print("mincut sink set size: ", len(mincut_sets[1]))
 
     return mincut_sets, mincut.value
 
@@ -451,7 +459,7 @@ def check_convergence(energy):
     global mask
     # TODO: implement convergence check
     convergence = False
-    if energy <= 1:
+    if energy <= 100:
         # change all soft background pixels to background pixels
         mask[mask == GC_PR_BGD] = GC_BGD
         convergence = True
@@ -490,7 +498,7 @@ def cal_metric(predicted_mask, gt_mask):
 
 def parse():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input_name', type=str, default='banana1', help='name of image from the course files')
+    parser.add_argument('--input_name', type=str, default='banana2', help='name of image from the course files')
     parser.add_argument('--eval', type=int, default=1, help='calculate the metrics')
     parser.add_argument('--input_img_path', type=str, default='', help='if you wish to use your own img_path')
     parser.add_argument('--use_file_rect', type=int, default=1, help='Read rect from course files')
