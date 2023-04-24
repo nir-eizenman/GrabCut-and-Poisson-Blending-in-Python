@@ -180,6 +180,36 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
     fgGMM.means_ = fg_means
     fgGMM.covariances_ = fg_covs
 
+    # Check if any of the GMM weights are 0, if so remove the component
+    bg_indices_to_remove = []
+    fg_indices_to_remove = []
+
+    for i in range(len(bgGMM.weights_)):
+        if bgGMM.weights_[i] <= 0.002:
+            bg_indices_to_remove.append(i)
+
+    for i in range(len(fgGMM.weights_)):
+        if fgGMM.weights_[i] <= 0.002:
+            fg_indices_to_remove.append(i)
+
+    if len(bg_indices_to_remove) > 0:
+        bgGMM.n_components = bgGMM.n_components - len(bg_indices_to_remove)
+        bgGMM.weights_ = np.delete(bgGMM.weights_, bg_indices_to_remove, axis=0)
+        bgGMM.means_ = np.delete(bgGMM.means_, bg_indices_to_remove, axis=0)
+        bgGMM.covariances_ = np.delete(bgGMM.covariances_, bg_indices_to_remove, axis=0)
+        bgGMM.means_init = np.delete(bgGMM.means_init, bg_indices_to_remove, axis=0)
+        bgGMM.precisions_ = np.delete(bgGMM.precisions_, bg_indices_to_remove, axis=0)
+        bgGMM.precisions_cholesky_ = np.delete(bgGMM.precisions_cholesky_, bg_indices_to_remove, axis=0)
+
+    if len(fg_indices_to_remove) > 0:
+        fgGMM.n_components = fgGMM.n_components - len(fg_indices_to_remove)
+        fgGMM.weights_ = np.delete(fgGMM.weights_, fg_indices_to_remove, axis=0)
+        fgGMM.means_ = np.delete(fgGMM.means_, fg_indices_to_remove, axis=0)
+        fgGMM.covariances_ = np.delete(fgGMM.covariances_, fg_indices_to_remove, axis=0)
+        fgGMM.means_init = np.delete(fgGMM.means_init, fg_indices_to_remove, axis=0)
+        fgGMM.precisions_ = np.delete(fgGMM.precisions_, fg_indices_to_remove, axis=0)
+        fgGMM.precisions_cholesky_ = np.delete(fgGMM.precisions_cholesky_, fg_indices_to_remove, axis=0)
+
     # print("Printing values after the calculations: \n")
     print("bgGMM weights: " + str(bgGMM.weights_))
     # print(bgGMM.weights_)
@@ -194,14 +224,6 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
     # print(fgGMM.means_)
     # print("fgGMM covs: ")
     # print(fgGMM.covariances_)
-    for i in bgGMM.weights_:
-        if i <= 0.000001:
-            print("bgGMM weights: " + str(bgGMM.weights_))
-            exit(0)
-    for i in fgGMM.weights_:
-        if i <= 0.000001:
-            print("fgGMM weights: " + str(fgGMM.weights_))
-            exit(0)
 
     return bgGMM, fgGMM
 
@@ -459,7 +481,7 @@ def check_convergence(energy):
     global mask
     # TODO: implement convergence check
     convergence = False
-    if energy <= 100:
+    if energy <= 500:
         # change all soft background pixels to background pixels
         mask[mask == GC_PR_BGD] = GC_BGD
         convergence = True
