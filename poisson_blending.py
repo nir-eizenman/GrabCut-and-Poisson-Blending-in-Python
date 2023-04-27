@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import scipy.sparse as sp
 from scipy.sparse.linalg import spsolve
 import argparse
+import math
 
 """
 Poisson Blending will allow you to blend source and target images. As we
@@ -20,46 +21,6 @@ Pay attention to the matrices size, you should use sparse matrices in your code.
 """
 
 
-#     # turn the mask to mask of 0 and 1
-#     new_mask = np.zeros((tgt_h, tgt_w))
-#     new_mask[temp_mask != 0] = 1
-#
-#     # Create the sparse matrix A for the Laplacian operator using scipy.sparse
-#     # The size of the matrix should be equal to the number of pixels in the source image (src_h * src_w)
-#     sparse_matrix_a = sp.lil_matrix((tgt_h * tgt_w, tgt_h * tgt_w))
-#     # turn the matrix to a sparse matrix
-#     sparse_matrix_a = sparse_matrix_a.tocsr()
-#     # fill the matrix with the correct values
-#     sparse_matrix_a.setdiag(-4)
-#     sparse_matrix_a.setdiag(1, 1)
-#     sparse_matrix_a.setdiag(1, -1)
-#     sparse_matrix_a.setdiag(1, tgt_w)
-#     sparse_matrix_a.setdiag(1, -tgt_w)
-#
-#     # Create the sparse matrix B for calculating the b vector using for the Poisson equation using scipy.sparse
-#     # The size of the matrix should be equal to the number of pixels in the source image (src_h * src_w)
-#     sparse_matrix_b = sp.lil_matrix((tgt_h * tgt_w, tgt_h * tgt_w))
-#     # turn the matrix to a sparse matrix
-#     sparse_matrix_b = sparse_matrix_b.tocsr()
-#     # fill the matrix with the correct values
-#     sparse_matrix_b.setdiag(1, 1)
-#     sparse_matrix_b.setdiag(1, -1)
-#     sparse_matrix_b.setdiag(1, tgt_w)
-#     sparse_matrix_b.setdiag(1, -tgt_w)
-#
-#     # Create the b vector for the Poisson equation using scipy.sparse
-#     # The size of the vector should be equal to the number of pixels in the source image (src_h * src_w)
-#     b = np.zeros((tgt_h * tgt_w, tgt_c))
-#     # fill the vector with the correct values
-#     b[:, 0] = sparse_matrix_b.dot(im_src[:, :, 0].flatten())
-#     b[:, 1] = sparse_matrix_b.dot(im_src[:, :, 1].flatten())
-#     b[:, 2] = sparse_matrix_b.dot(im_src[:, :, 2].flatten())
-#
-#
-#     # Solve the equation using scipy.sparse.linalg.spsolve
-#     # The solution should be a vector of size (src_h * src_w)
-#     x = spsolve(sparse_matrix_a, b)
-
 def poisson_blend(im_src, im_tgt, im_mask, center):
     # Get dimensions of source image
     src_h, src_w, _ = im_src.shape
@@ -71,13 +32,8 @@ def poisson_blend(im_src, im_tgt, im_mask, center):
     # calculate the offset of the source image ((x_min, y_min) is the coordinates of the top left corner of the
     # source image in the target image and (x_max, y_max) is the
     # coordinates of the bottom right corner of the source image in the target image)
-    y_min, y_max = center[1] - mask_h // 2, center[1] + mask_h // 2
-    x_min, x_max = center[0] - mask_w // 2, center[0] + mask_w // 2
-
-    # # initialize matrix A
-    # # TODO: check if the matrix is correct
-    # matrix_a = sp.diags([4, -1, -1, 1, 1], [0, -1, 1, -mask_w, mask_w], shape=(mask_h * mask_w, mask_h * mask_w),
-    #                     format="csr")
+    y_min, y_max = center[1] - mask_h // 2, math.ceil(center[1] + mask_h / 2)
+    x_min, x_max = center[0] - mask_w // 2, math.ceil(center[0] + mask_w / 2)
 
     matrix_d = sp.lil_matrix((mask_w, mask_w))
     matrix_d.setdiag(-1, -1)
@@ -106,30 +62,20 @@ def poisson_blend(im_src, im_tgt, im_mask, center):
     # create an image for the result (currently containing the target image)
     im_blend = np.copy(im_tgt)
 
-    for channel in range(im_src.shape[2]):
-        # mask_grad_x = cv2.Sobel(im_mask, cv2.CV_64F, 1, 0, ksize=1)
-        # mask_grad_y = cv2.Sobel(im_mask, cv2.CV_64F, 0, 1, ksize=1)
-        #
-        # src_grad_x = cv2.Sobel(im_src[:, :, channel], cv2.CV_64F, 1, 0, ksize=1)
-        # src_grad_y = cv2.Sobel(im_src[:, :, channel], cv2.CV_64F, 0, 1, ksize=1)
-        #
-        # mixed_grad_x = np.where(mask_grad_x != 0, src_grad_x, 0)
-        # mixed_grad_y = np.where(mask_grad_y != 0, src_grad_y, 0)
-        #
-        # div_mixed_grad = cv2.subtract(cv2.Sobel(mixed_grad_x, cv2.CV_64F, 1, 0, ksize=1),
-        #                               cv2.Sobel(mixed_grad_y, cv2.CV_64F, 0, 1, ksize=1))
-        #
-        # flat_div_mixed_grad = div_mixed_grad.flatten()
+    mask_flat = im_mask.flatten()
 
+    for channel in range(im_src.shape[2]):
         source_flat = im_src[:, :, channel].flatten()
+        target_flat = im_tgt[y_min:y_max, x_min:x_max, channel].flatten()
 
         vector_b = laplacian.dot(source_flat)
 
-        # outside the mask:
-        # f = t
+        vector_b[mask_flat == 0] = target_flat[mask_flat == 0]
 
         x = spsolve(matrix_b, vector_b)
 
+        # if there are values outside the range [0, 255] clip them (255+ is set to 255 and 0- is set to 0),
+        # convert the image to uint8 (unsigned int of 8 bits) and return it
         x = np.clip(x, 0, 255).astype(np.uint8)
 
         x = x.reshape(mask_h, mask_w)
@@ -137,17 +83,14 @@ def poisson_blend(im_src, im_tgt, im_mask, center):
         im_blend[y_min:y_max, x_min:x_max, channel] = np.where(im_mask == 255, x,
                                                                im_tgt[y_min:y_max, x_min:x_max, channel])
 
-    # if there are values outside the range [0, 255] clip them (255+ is set to 255 and 0- is set to 0),
-    # convert the image to uint8 (unsigned int of 8 bits) and return it
-
     # Return the blended image
     return im_blend
 
 
 def parse():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--src_path', type=str, default='./data/imgs/banana2.jpg', help='image file path')
-    parser.add_argument('--mask_path', type=str, default='./data/seg_GT/banana2.bmp', help='mask file path')
+    parser.add_argument('--src_path', type=str, default='./data/imgs/bush.jpg', help='image file path')
+    parser.add_argument('--mask_path', type=str, default='./data/seg_GT/bush.bmp', help='mask file path')
     parser.add_argument('--tgt_path', type=str, default='./data/bg/table.jpg', help='mask file path')
     return parser.parse_args()
 
