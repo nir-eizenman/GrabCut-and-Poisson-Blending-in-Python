@@ -89,18 +89,19 @@ def poisson_blend(im_src, im_tgt, im_mask, center):
     matrix_a.setdiag(-1, 1 * mask_w)
     matrix_a.setdiag(-1, -1 * mask_w)
 
-    laplacian = matrix_a.tocsr()
+    laplacian = matrix_a.tocsc()
 
-    # upscale the mask to the size of the target image (use y_min, y_max, x_min, x_max to calculate the offset,
-    # fill the pixels outside the mask with 0)
-    new_mask = np.zeros((tgt_h, tgt_w))
-    new_mask[y_min:y_max, x_min:x_max] = im_mask
-    # upscale the new_mask to the size of (tgt_h * tgt_w, tgt_h * tgt_w), such that each pixel in the mask will be a
-    # diagonal matrix of size (mask_w, mask_w) in the new matrix
+    for y in range(1, mask_h - 1):
+        for x in range(1, mask_w - 1):
+            if im_mask[y, x] == 0:
+                k = x + y * mask_w
+                matrix_a[k, k] = 1
+                matrix_a[k, k + 1] = 0
+                matrix_a[k, k - 1] = 0
+                matrix_a[k, k + mask_w] = 0
+                matrix_a[k, k - mask_w] = 0
 
-    # *****
-    # continue here
-    # *****
+    matrix_b = matrix_a.tocsc()
 
     # create an image for the result (currently containing the target image)
     im_blend = np.copy(im_tgt)
@@ -120,16 +121,24 @@ def poisson_blend(im_src, im_tgt, im_mask, center):
         #
         # flat_div_mixed_grad = div_mixed_grad.flatten()
 
-        poisson_solution = spsolve(laplacian, b[:, channel])
+        source_flat = im_src[:, :, channel].flatten()
 
-        poisson_solution_2d = poisson_solution.reshape(mask_h, mask_w)
+        vector_b = laplacian.dot(source_flat)
 
-        im_blend[y_min:y_max, x_min:x_max, channel] = np.where(im_mask == 255, poisson_solution_2d,
+        # outside the mask:
+        # f = t
+
+        x = spsolve(matrix_b, vector_b)
+
+        x = np.clip(x, 0, 255).astype(np.uint8)
+
+        x = x.reshape(mask_h, mask_w)
+
+        im_blend[y_min:y_max, x_min:x_max, channel] = np.where(im_mask == 255, x,
                                                                im_tgt[y_min:y_max, x_min:x_max, channel])
 
     # if there are values outside the range [0, 255] clip them (255+ is set to 255 and 0- is set to 0),
     # convert the image to uint8 (unsigned int of 8 bits) and return it
-    im_blend = np.clip(im_blend, 0, 255).astype(np.uint8)
 
     # Return the blended image
     return im_blend
@@ -138,7 +147,7 @@ def poisson_blend(im_src, im_tgt, im_mask, center):
 def parse():
     parser = argparse.ArgumentParser()
     parser.add_argument('--src_path', type=str, default='./data/imgs/banana2.jpg', help='image file path')
-    parser.add_argument('--mask_path', type=str, default='./data/seg_GT/banana1.bmp', help='mask file path')
+    parser.add_argument('--mask_path', type=str, default='./data/seg_GT/banana2.bmp', help='mask file path')
     parser.add_argument('--tgt_path', type=str, default='./data/bg/table.jpg', help='mask file path')
     return parser.parse_args()
 
