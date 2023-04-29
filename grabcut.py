@@ -1,3 +1,4 @@
+import igraph
 import numpy as np
 import cv2
 import argparse
@@ -252,17 +253,18 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
 
     # Calculate data term (used to T-link)
     data_term = np.zeros((h, w, 2))
-    for i in range(h):
-        for j in range(w):
-            # Calculate the probability of the pixel belonging to the background and foreground
-            # (this calculates D(i, s) and D(i, t) in the GrabCut algorithm for each pixel,
-            # where (i, j) is the pixel and s and t are the source and sink nodes (background and foreground respectively))
-            data_term[i, j, 0] = -bgGMM.score(img[i, j].reshape(1, -1))
-            data_term[i, j, 1] = -fgGMM.score(img[i, j].reshape(1, -1))
 
-            # ***********************
-            # maybe K is actually the number of components in the GMM
-            # ***********************
+
+    img_reshaped = img.reshape(h * w, -1)
+    bg_data = -bgGMM.score_samples(img_reshaped).reshape(h, w, 1)
+    fg_data = -fgGMM.score_samples(img_reshaped).reshape(h, w, 1)
+
+    data_term = np.concatenate((bg_data, fg_data), axis=2)
+
+
+    # ***********************
+    # maybe K is actually the number of components in the GMM
+    # ***********************
 
     # print("data_term time: ", time.time() - dt_time)
     # print("data_term: ")
@@ -520,7 +522,7 @@ def cal_metric(predicted_mask, gt_mask):
 
 def parse():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input_name', type=str, default='banana2', help='name of image from the course files')
+    parser.add_argument('--input_name', type=str, default='memorial', help='name of image from the course files')
     parser.add_argument('--eval', type=int, default=1, help='calculate the metrics')
     parser.add_argument('--input_img_path', type=str, default='', help='if you wish to use your own img_path')
     parser.add_argument('--use_file_rect', type=int, default=1, help='Read rect from course files')
