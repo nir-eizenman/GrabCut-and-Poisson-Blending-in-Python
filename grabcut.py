@@ -1,39 +1,34 @@
-import igraph
-import numpy as np
+import igraph as ig
 import cv2
 import argparse
 from sklearn.mixture import GaussianMixture
 from sklearn.cluster import KMeans
-import igraph as ig
-
-import time
+import numpy as np
 
 GC_BGD = 0  # Hard bg pixel
 GC_FGD = 1  # Hard fg pixel, will not be used
 GC_PR_BGD = 2  # Soft bg pixel
 GC_PR_FGD = 3  # Soft fg pixel
+
+# initialize the mask (because we want it as a global variable)
 mask = []
 
 
 # Define the GrabCut algorithm function
 def grabcut(img, rect, n_iter=5):
     global mask
-    previous_energy = 0
-    str_time = time.time()
 
-    # ********* This is a suggested fix from whatsapp *********
+    prev_energy = 0
+
     img = np.asarray(img, dtype=np.float64)
-    # *********************************************************
 
     # Assign initial labels to the pixels based on the bounding box
     mask = np.zeros(img.shape[:2], dtype=np.uint8)
     mask.fill(GC_BGD)
     x, y, w, h = rect
 
-    # this is a suggested fix from whatsapp****
-    w -= x
     h -= y
-    # ***************************************
+    w -= x
 
     # Initalize the inner square to Foreground
     mask[y:y + h, x:x + w] = GC_PR_FGD
@@ -43,75 +38,40 @@ def grabcut(img, rect, n_iter=5):
 
     num_iters = 1000
     for i in range(num_iters):
-        # Update GMM
-        iter_str_time = time.time()
 
         bgGMM, fgGMM = update_GMMs(img, mask, bgGMM, fgGMM)
 
-        mincut_sets, energy = calculate_mincut(img, mask, bgGMM, fgGMM)
+        mincut_sets, curr_energy = calculate_mincut(img, mask, bgGMM, fgGMM)
 
-        print("Iteration: " + str(i + 1) + " after calculating mincut, energy is: " + str(energy))
         mask = update_mask(mincut_sets, mask)
-        print("difference between energies: " + str(np.abs(energy - previous_energy)))
-        print("Time to complete iteration: " + str(round(time.time() - iter_str_time, 2)) + " seconds\n")
 
-        if check_convergence(np.abs(energy - previous_energy)):
-            print("iterations to convergence: " + str(i + 1))
+        if check_convergence(np.abs(prev_energy - curr_energy)):
             break
-        previous_energy = energy
+        prev_energy = curr_energy
 
     # Return the final mask and the GMMs
-    print("Total time: " + str(round((time.time() - str_time) / 60, 2)) + " minutes")
 
     return mask, bgGMM, fgGMM
 
 
-"""
-2.1 init GMMs(img, mask, n components=5):
-In this method you should initialize and return two GMMs models one for
-the background and one for the foreground, each of them should consist of
-n components. The initialization should use kmeans. You could use your own
-implementation of GMM or use any existing one, however you should pay attention
-to the differences between off-the-shelf models and the use of it in the
-grabcut algorithm.
-"""
-
-
 def initalize_GMMs(img, mask, n_components=5):
-    # TODO: implement initalize_GMMs
-    # print("\n*** Welcome to Initalize ***\n")
     # Extract the foreground and background pixels from the mask
     fg_data = img[np.logical_or(mask == GC_PR_FGD, mask == GC_FGD)].reshape(-1, 3)
     bg_data = img[np.logical_or(mask == GC_PR_BGD, mask == GC_BGD)].reshape(-1, 3)
 
     # Initialize with k-means clustering
-    bg_kmeans = KMeans(n_clusters=n_components, random_state=None)
+    bg_kmeans = KMeans(n_clusters=n_components)
     bg_kmeans.fit(bg_data)
-    fg_kmeans = KMeans(n_clusters=n_components, random_state=None)
+    fg_kmeans = KMeans(n_clusters=n_components)
     fg_kmeans.fit(fg_data)
 
     # Initialize GMMs with k-means cluster centers
-    bgGMM = GaussianMixture(n_components=n_components, means_init=bg_kmeans.cluster_centers_, random_state=None)
+    bgGMM = GaussianMixture(n_components=n_components, means_init=bg_kmeans.cluster_centers_)
     bgGMM.fit(bg_data)
 
-    fgGMM = GaussianMixture(n_components=n_components, means_init=fg_kmeans.cluster_centers_, random_state=None)
+    fgGMM = GaussianMixture(n_components=n_components, means_init=fg_kmeans.cluster_centers_)
     fgGMM.fit(fg_data)
-    # print("\n*** goodbye from Initalize ***")
     return bgGMM, fgGMM
-
-
-"""
-2.2 update GMMs(img, mask, bgdGMM, fgdGMM):
-In this method, you need to update the Gaussian Mixture Models (GMMs)
-for the foreground and background pixels based on the current mask. This step
-involves calculating the mean, covariance matrix and weights of each GMM component
-for the foreground and background pixels in the input image. You can
-use the cv2.calcCovarMatrix() (or np.conv) function to calculate the covariance
-matrix and mean values, respectively.
-After calculating the mean and covariance matrix, you need to update the
-GMMs using the formulae given in the GrabCut algorithm. You can refer to
-the following links for more information on this step: cv2.calcCovarMatrix.
-"""
 
 
 # Define helper functions for the GrabCut algorithm
@@ -121,24 +81,15 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
     fg_data = img[np.logical_or(mask == GC_PR_FGD, mask == GC_FGD)].reshape(-1, 3)
     bg_data = img[np.logical_or(mask == GC_PR_BGD, mask == GC_BGD)].reshape(-1, 3)
 
-    # print("size of bg_data: " + str(bg_data.shape))
-    # print("size of fg_data: " + str(fg_data.shape))
-    # print("number of 0s in mask: " + str(np.count_nonzero(mask == 0)))
-    # print("number of 1s in mask: " + str(np.count_nonzero(mask == 1)))
-    # print("number of 2s in mask: " + str(np.count_nonzero(mask == 2)))
-    # print("number of 3s in mask: " + str(np.count_nonzero(mask == 3)))
-
     # Initialize background GMM
     bg_n_components = bgGMM.n_components
-    bg_weights = np.zeros(bg_n_components)
-    bg_means = np.zeros((bg_n_components, 3))  # 3 is the number of channels ( RGB )
     bg_covs = np.zeros((bg_n_components, 3, 3))
-    # the shape is (n_components, n_channels, n_channels) because the covariance matrix is a square matrix
+    bg_m = np.zeros((bg_n_components, 3))
+    bg_w = np.zeros(bg_n_components)
 
     # Iterate over the GMM components
     # Calculate the mean and covariance of each component
     # Update the GMM weights, means and covariances
-
     for i in range(bg_n_components):
         # Get the pixels that belong to the current component
         component_mask = bgGMM.predict(bg_data) == i
@@ -149,16 +100,17 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
         # Update the GMM weights, means and covariances
         if len(component_data) > 0:
             # Calculate the weight of the current component by dividing the number of pixels in the component by the total number of pixels
-            bg_weights[i] = len(component_data) / len(bg_data)
+            bg_w[i] = len(component_data) / len(bg_data)
             # Calculate the mean and covariance of the current component using the cv2.calcCovarMatrix function
-            cov, mean = cv2.calcCovarMatrix(component_data, None, cv2.COVAR_NORMAL | cv2.COVAR_SCALE | cv2.COVAR_ROWS)
             # Update the GMM weights, means and covariances
-            bg_means[i] = mean.flatten()
-            bg_covs[i] = cov
+            covar, means = cv2.calcCovarMatrix(component_data, None,
+                                               cv2.COVAR_NORMAL | cv2.COVAR_SCALE | cv2.COVAR_ROWS)
+            bg_m[i] = means.flatten()
+            bg_covs[i] = covar
 
     # Update the GMM weights, means and covariances
-    bgGMM.weights_ = bg_weights
-    bgGMM.means_ = bg_means
+    bgGMM.weights_ = bg_w
+    bgGMM.means_ = bg_m
     bgGMM.covariances_ = bg_covs
 
     # Update foreground GMM ( same as the background GMM )
@@ -173,106 +125,62 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
 
         if len(component_data) > 0:
             fg_weights[i] = len(component_data) / len(fg_data)
-            cov, mean = cv2.calcCovarMatrix(component_data, None, cv2.COVAR_NORMAL | cv2.COVAR_SCALE | cv2.COVAR_ROWS)
-            fg_means[i] = mean.flatten()
-            fg_covs[i] = cov
+            covar, means = cv2.calcCovarMatrix(component_data, None,
+                                               cv2.COVAR_NORMAL | cv2.COVAR_SCALE | cv2.COVAR_ROWS)
+            fg_means[i] = means.flatten()
+            fg_covs[i] = covar
 
     fgGMM.weights_ = fg_weights
     fgGMM.means_ = fg_means
     fgGMM.covariances_ = fg_covs
 
     # Check if any of the GMM weights are 0, if so remove the component
-    bg_indices_to_remove = []
-    fg_indices_to_remove = []
+    bg_ind_to_remove = []
+    fg_ind_to_remove = []
 
     for i in range(len(bgGMM.weights_)):
-        if bgGMM.weights_[i] <= 0.002:
-            bg_indices_to_remove.append(i)
+        if bgGMM.weights_[i] <= 0.0025:
+            bg_ind_to_remove.append(i)
 
     for i in range(len(fgGMM.weights_)):
-        if fgGMM.weights_[i] <= 0.002:
-            fg_indices_to_remove.append(i)
+        if fgGMM.weights_[i] <= 0.0025:
+            fg_ind_to_remove.append(i)
 
-    if len(bg_indices_to_remove) > 0:
-        bgGMM.n_components = bgGMM.n_components - len(bg_indices_to_remove)
-        bgGMM.weights_ = np.delete(bgGMM.weights_, bg_indices_to_remove, axis=0)
-        bgGMM.means_ = np.delete(bgGMM.means_, bg_indices_to_remove, axis=0)
-        bgGMM.covariances_ = np.delete(bgGMM.covariances_, bg_indices_to_remove, axis=0)
-        bgGMM.means_init = np.delete(bgGMM.means_init, bg_indices_to_remove, axis=0)
-        bgGMM.precisions_ = np.delete(bgGMM.precisions_, bg_indices_to_remove, axis=0)
-        bgGMM.precisions_cholesky_ = np.delete(bgGMM.precisions_cholesky_, bg_indices_to_remove, axis=0)
+    if len(bg_ind_to_remove) > 0:
+        bgGMM.n_components = bgGMM.n_components - len(bg_ind_to_remove)
+        bgGMM.weights_ = np.delete(bgGMM.weights_, bg_ind_to_remove, axis=0)
+        bgGMM.means_ = np.delete(bgGMM.means_, bg_ind_to_remove, axis=0)
+        bgGMM.means_init = np.delete(bgGMM.means_init, bg_ind_to_remove, axis=0)
+        bgGMM.covariances_ = np.delete(bgGMM.covariances_, bg_ind_to_remove, axis=0)
+        bgGMM.precisions_ = np.delete(bgGMM.precisions_, bg_ind_to_remove, axis=0)
+        bgGMM.precisions_cholesky_ = np.delete(bgGMM.precisions_cholesky_, bg_ind_to_remove, axis=0)
 
-    if len(fg_indices_to_remove) > 0:
-        fgGMM.n_components = fgGMM.n_components - len(fg_indices_to_remove)
-        fgGMM.weights_ = np.delete(fgGMM.weights_, fg_indices_to_remove, axis=0)
-        fgGMM.means_ = np.delete(fgGMM.means_, fg_indices_to_remove, axis=0)
-        fgGMM.covariances_ = np.delete(fgGMM.covariances_, fg_indices_to_remove, axis=0)
-        fgGMM.means_init = np.delete(fgGMM.means_init, fg_indices_to_remove, axis=0)
-        fgGMM.precisions_ = np.delete(fgGMM.precisions_, fg_indices_to_remove, axis=0)
-        fgGMM.precisions_cholesky_ = np.delete(fgGMM.precisions_cholesky_, fg_indices_to_remove, axis=0)
-
-    # print("Printing values after the calculations: \n")
-    print("bgGMM weights: " + str(bgGMM.weights_))
-    # print(bgGMM.weights_)
-    # print("bgGMM means: ")
-    # print(bgGMM.means_)
-    # print("bgGMM covs: ")
-    # print(bgGMM.covariances_)
-    #
-    print("fgGMM weights: " + str(fgGMM.weights_))
-    # print(fgGMM.weights_)
-    # print("fgGMM means: ")
-    # print(fgGMM.means_)
-    # print("fgGMM covs: ")
-    # print(fgGMM.covariances_)
+    if len(fg_ind_to_remove) > 0:
+        fgGMM.n_components = fgGMM.n_components - len(fg_ind_to_remove)
+        fgGMM.weights_ = np.delete(fgGMM.weights_, fg_ind_to_remove, axis=0)
+        fgGMM.means_ = np.delete(fgGMM.means_, fg_ind_to_remove, axis=0)
+        fgGMM.means_init = np.delete(fgGMM.means_init, fg_ind_to_remove, axis=0)
+        fgGMM.covariances_ = np.delete(fgGMM.covariances_, fg_ind_to_remove, axis=0)
+        fgGMM.precisions_ = np.delete(fgGMM.precisions_, fg_ind_to_remove, axis=0)
+        fgGMM.precisions_cholesky_ = np.delete(fgGMM.precisions_cholesky_, fg_ind_to_remove, axis=0)
 
     return bgGMM, fgGMM
 
 
-"""
-2.3 calculate mincut(img, mask, bgdGMM, fgdGMM):
-In this method you should build a graph based on the existing mask and the
-energy terms defined in the grabcut algorithm. Then a mincut should be used.
-The method should return the vertices (i.e. pixels) in each segment and the
-energy term corresponding to the cut. You are allowed to use any graph optimization
-library, for example igraph.
-"""
-
-
 def calculate_mincut(img, mask, bgGMM, fgGMM):
-    min_cut = [[], []]
-    energy = 0
     h, w = img.shape[:2]
     img_indices = np.arange(h * w).reshape(h, w)
-    graph = ig.Graph()
-    graph.add_vertices(h * w + 2)
+    mc_graph = ig.Graph()
+    mc_graph.add_vertices(h * w + 2)
     source = h * w
     sink = h * w + 1
 
-    # dt_time = time.time()
+    flatten_img = img.reshape(h * w, -1)
+    bg_data = -bgGMM.score_samples(flatten_img).reshape(h, w, 1)
+    fg_data = -fgGMM.score_samples(flatten_img).reshape(h, w, 1)
 
-    # Calculate data term (used to T-link)
-    data_term = np.zeros((h, w, 2))
+    d_term = np.concatenate((bg_data, fg_data), axis=2)
 
-
-    img_reshaped = img.reshape(h * w, -1)
-    bg_data = -bgGMM.score_samples(img_reshaped).reshape(h, w, 1)
-    fg_data = -fgGMM.score_samples(img_reshaped).reshape(h, w, 1)
-
-    data_term = np.concatenate((bg_data, fg_data), axis=2)
-
-
-    # ***********************
-    # maybe K is actually the number of components in the GMM
-    # ***********************
-
-    # print("data_term time: ", time.time() - dt_time)
-    # print("data_term: ")
-    # print(data_term)
-
-    gamma = 50
-
-    # beta = 1 / (2 * np.mean(np.sum((img[:-1, :] - img[1:, :]) ** 2, axis=2)))
     # calculate beta by summing the Euclidean distance between each pixel (its color vector) and his 8 neighbors
     # and then dividing the sum by the number of pixels, and then multiplying the result by 2 and then taking the inverse
     beta = 0
@@ -298,15 +206,13 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
             if i < h - 1 and j < w - 1:
                 beta += np.linalg.norm(img[i, j] - img[i + 1, j + 1]) ** 2
 
-    # calculate the number of pixels
-    num_pixels = h * w
-    # calculate beta by dividing the sum of the distances by the number of pixels, and then multiplying the result by 2 and then taking the inverse
-    beta = beta / ((num_pixels * 8) - (h * 2 + w * 2 + 4))
-    beta = 2 * beta
-    beta = 1 / beta
+    # calculate beta by dividing the sum of the distances by the number of pixels,
+    # and then multiplying the result by 2 and then taking the inverse
+    beta = beta / ((h * w * 8) - (h * 2 + w * 2 + 4))
+    beta = 1 / (beta * 2)
 
-    # print("beta: ")
-    # print(beta)
+    # recommended gamma value
+    gamma = 50
 
     # Add edges to the graph
     edges = []
@@ -316,114 +222,114 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
     for i in range(h):
         for j in range(w):
             # calculate K value for each pixel by holding the maximum of all N-links that are connected to the pixel
-            # (used to T-link, but calulated as the maximum of all N-links that are connected to the pixel)
+            # (used to T-link, but calculated as the maximum of all N-links that are connected to the pixel)
             k = 0
             # set the node index of the current pixel
-            node1 = img_indices[i, j]
+            curr_node = img_indices[i, j]
 
             # Calculate edge weight for top neighbor
             if i > 0:
-                node2 = img_indices[i - 1, j]
+                second_node = img_indices[i - 1, j]
                 # color difference between the current pixel and its top left neighbor
                 # calculated by the norm of the difference between the two pixel's color vectors
-                color_diff = (np.linalg.norm(img[i, j] - img[i - 1, j])) ** 2
-                edge_weight = gamma * np.exp(-beta * color_diff)
-                edges.append((node1, node2))
+                color_difference = (np.linalg.norm(img[i, j] - img[i - 1, j])) ** 2
+                edge_weight = gamma * np.exp(-beta * color_difference)
+                edges.append((curr_node, second_node))
                 weights.append(edge_weight)
                 k = max(k, edge_weight)
 
             # Calculate edge weight for left neighbor
             if j > 0:
-                node2 = img_indices[i, j - 1]
+                second_node = img_indices[i, j - 1]
                 # color difference between the current pixel and its top left neighbor
                 # calculated by the norm of the difference between the two pixel's color vectors
-                color_diff = (np.linalg.norm(img[i, j] - img[i, j - 1])) ** 2
-                edge_weight = gamma * np.exp(-beta * color_diff)
-                edges.append((node1, node2))
-                weights.append(edge_weight)
-                k = max(k, edge_weight)
-
-            # Calculate edge weight for bottom neighbor
-            if i < h - 1:
-                node2 = img_indices[i + 1, j]
-                # color difference between the current pixel and its top left neighbor
-                # calculated by the norm of the difference between the two pixel's color vectors
-                color_diff = (np.linalg.norm(img[i, j] - img[i + 1, j])) ** 2
-                edge_weight = gamma * np.exp(-beta * color_diff)
-                edges.append((node1, node2))
+                color_difference = (np.linalg.norm(img[i, j] - img[i, j - 1])) ** 2
+                edge_weight = gamma * np.exp(-beta * color_difference)
+                edges.append((curr_node, second_node))
                 weights.append(edge_weight)
                 k = max(k, edge_weight)
 
             # Calculate edge weight for right neighbor
             if j < w - 1:
-                node2 = img_indices[i, j + 1]
+                second_node = img_indices[i, j + 1]
                 # color difference between the current pixel and its top left neighbor
                 # calculated by the norm of the difference between the two pixel's color vectors
-                color_diff = (np.linalg.norm(img[i, j] - img[i, j + 1])) ** 2
-                edge_weight = gamma * np.exp(-beta * color_diff)
-                edges.append((node1, node2))
+                color_difference = (np.linalg.norm(img[i, j] - img[i, j + 1])) ** 2
+                edge_weight = gamma * np.exp(-beta * color_difference)
+                edges.append((curr_node, second_node))
+                weights.append(edge_weight)
+                k = max(k, edge_weight)
+
+            # Calculate edge weight for bottom neighbor
+            if i < h - 1:
+                second_node = img_indices[i + 1, j]
+                # color difference between the current pixel and its top left neighbor
+                # calculated by the norm of the difference between the two pixel's color vectors
+                color_difference = (np.linalg.norm(img[i, j] - img[i + 1, j])) ** 2
+                edge_weight = gamma * np.exp(-beta * color_difference)
+                edges.append((curr_node, second_node))
                 weights.append(edge_weight)
                 k = max(k, edge_weight)
 
             # calculate edge weight for top left neighbor
             if i > 0 and j > 0:
-                node2 = img_indices[i - 1, j - 1]
+                second_node = img_indices[i - 1, j - 1]
                 # color difference between the current pixel and its top left neighbor
                 # calculated by the norm of the difference between the two pixel's color vectors
-                color_diff = (np.linalg.norm(img[i, j] - img[i - 1, j - 1])) ** 2
+                color_difference = (np.linalg.norm(img[i, j] - img[i - 1, j - 1])) ** 2
                 # dividing by sqrt(2) because distance between the pixels is sqrt(2) in case of diagonal neighbors
-                edge_weight = (1 / np.sqrt(2)) * gamma * np.exp(-beta * color_diff)
-                edges.append((node1, node2))
-                weights.append(edge_weight)
-                k = max(k, edge_weight)
-
-            # calculate edge weight for top right neighbor
-            if i > 0 and j < w - 1:
-                node2 = img_indices[i - 1, j + 1]
-                # color difference between the current pixel and its top left neighbor
-                # calculated by the norm of the difference between the two pixel's color vectors
-                color_diff = (np.linalg.norm(img[i, j] - img[i - 1, j + 1])) ** 2
-                # dividing by sqrt(2) because distance between the pixels is sqrt(2) in case of diagonal neighbors
-                edge_weight = (1 / np.sqrt(2)) * gamma * np.exp(-beta * color_diff)
-                edges.append((node1, node2))
+                edge_weight = (1 / np.sqrt(2)) * gamma * np.exp(-beta * color_difference)
+                edges.append((curr_node, second_node))
                 weights.append(edge_weight)
                 k = max(k, edge_weight)
 
             # calculate edge weight for bottom left neighbor
             if i < h - 1 and j > 0:
-                node2 = img_indices[i + 1, j - 1]
+                second_node = img_indices[i + 1, j - 1]
                 # color difference between the current pixel and its top left neighbor
                 # calculated by the norm of the difference between the two pixel's color vectors
-                color_diff = (np.linalg.norm(img[i, j] - img[i + 1, j - 1])) ** 2
+                color_difference = (np.linalg.norm(img[i, j] - img[i + 1, j - 1])) ** 2
                 # dividing by sqrt(2) because distance between the pixels is sqrt(2) in case of diagonal neighbors
-                edge_weight = (1 / np.sqrt(2)) * gamma * np.exp(-beta * color_diff)
-                edges.append((node1, node2))
+                edge_weight = (1 / np.sqrt(2)) * gamma * np.exp(-beta * color_difference)
+                edges.append((curr_node, second_node))
+                weights.append(edge_weight)
+                k = max(k, edge_weight)
+
+            # calculate edge weight for top right neighbor
+            if i > 0 and j < w - 1:
+                second_node = img_indices[i - 1, j + 1]
+                # color difference between the current pixel and its top left neighbor
+                # calculated by the norm of the difference between the two pixel's color vectors
+                color_difference = (np.linalg.norm(img[i, j] - img[i - 1, j + 1])) ** 2
+                # dividing by sqrt(2) because distance between the pixels is sqrt(2) in case of diagonal neighbors
+                edge_weight = (1 / np.sqrt(2)) * gamma * np.exp(-beta * color_difference)
+                edges.append((curr_node, second_node))
                 weights.append(edge_weight)
                 k = max(k, edge_weight)
 
             # calculate edge weight for bottom right neighbor
             if i < h - 1 and j < w - 1:
-                node2 = img_indices[i + 1, j + 1]
+                second_node = img_indices[i + 1, j + 1]
                 # color difference between the current pixel and its top left neighbor
                 # calculated by the norm of the difference between the two pixel's color vectors
-                color_diff = (np.linalg.norm(img[i, j] - img[i + 1, j + 1])) ** 2
+                color_difference = (np.linalg.norm(img[i, j] - img[i + 1, j + 1])) ** 2
                 # dividing by sqrt(2) because distance between the pixels is sqrt(2) in case of diagonal neighbors
-                edge_weight = (1 / np.sqrt(2)) * gamma * np.exp(-beta * color_diff)
-                edges.append((node1, node2))
+                edge_weight = (1 / np.sqrt(2)) * gamma * np.exp(-beta * color_difference)
+                edges.append((curr_node, second_node))
                 weights.append(edge_weight)
                 k = max(k, edge_weight)
 
             # get the value of Dback for the current pixel
-            Dback = data_term[i, j, 0]
+            d_back = d_term[i, j, 0]
             # get the value of Dfore for the current pixel
-            Dfore = data_term[i, j, 1]
-            edges.append((source, node1))
-            edges.append((node1, sink))
+            d_fore = d_term[i, j, 1]
+            edges.append((source, curr_node))
+            edges.append((curr_node, sink))
 
             # check if the current pixel is a background pixel or a foreground pixel using the mask
             if mask[i, j] == GC_PR_FGD or mask[i, j] == GC_PR_BGD:
-                weights.append(Dfore)
-                weights.append(Dback)
+                weights.append(d_fore)
+                weights.append(d_back)
             if mask[i, j] == GC_FGD:
                 weights.append(0)
                 weights.append(k)
@@ -431,98 +337,65 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
                 weights.append(k)
                 weights.append(0)
 
-    graph.add_edges(edges, {'weight': weights})
+    mc_graph.add_edges(edges, {'weight': weights})
 
-    # graph.es["weight"] = weights
-    # print("number of edges: ", len(graph.es))
+    mincut_result = mc_graph.st_mincut(source, sink, capacity='weight')
 
-    # min_cut_time = time.time()
+    mincut_set_list = [set(mincut_result.partition[0]), set(mincut_result.partition[1])]
 
-    mincut = graph.st_mincut(source, sink, capacity='weight')
-    # print("time taken to calculate mincut: ", time.time() - min_cut_time)
-    mincut_sets = [set(mincut.partition[0]), set(mincut.partition[1])]
-    # print("mincut source set size: ", len(mincut_sets[0]))
-    # print("mincut sink set size: ", len(mincut_sets[1]))
-
-    return mincut_sets, mincut.value
-
-
-"""
-2.4 update mask(img, mask, mincut sets):
-In this method, you need to update the current mask based on the mincut and
-return a new mask.
-"""
+    return mincut_set_list, mincut_result.value
 
 
 def update_mask(mincut_sets, mask):
     h, w = mask.shape
-    img_indices = np.arange(h * w).reshape(h, w)
-    new_mask = np.copy(mask)
+    im_indices = np.arange(h * w).reshape(h, w)
+    mask_copy = np.copy(mask)
     for i in range(h):
         for j in range(w):
-            if img_indices[i, j] in mincut_sets[0] and (mask[i, j] == GC_PR_FGD or mask[i, j] == GC_PR_BGD):
-                new_mask[i, j] = GC_PR_BGD
-            elif img_indices[i, j] in mincut_sets[1] and (mask[i, j] == GC_PR_FGD or mask[i, j] == GC_PR_BGD):
-                new_mask[i, j] = GC_PR_FGD
+            if im_indices[i, j] in mincut_sets[0] and (mask[i, j] == GC_PR_FGD or mask[i, j] == GC_PR_BGD):
+                mask_copy[i, j] = GC_PR_BGD
+            elif im_indices[i, j] in mincut_sets[1] and (mask[i, j] == GC_PR_FGD or mask[i, j] == GC_PR_BGD):
+                mask_copy[i, j] = GC_PR_FGD
 
-    mask = np.copy(new_mask)
+    mask = np.copy(mask_copy)
 
     return mask
 
 
-"""
-2.5 check convergence(energy):
-In this method, you need to check whether the energy value has converged to
-a stable minimum or not. You can use a threshold value to determine whether
-the energy has converged or not. If the energy has converged, you can return
-True, otherwise return False.
-"""
-
-
 def check_convergence(energy):
     global mask
-    # TODO: implement convergence check
-    convergence = False
-    if energy <= 500:
-        # change all soft background pixels to background pixels
+    is_conv = False
+    if energy <= 1500:
+        # change all soft background pixels to hard background pixels
         mask[mask == GC_PR_BGD] = GC_BGD
-        convergence = True
-    return convergence
-
-
-"""
-2.6 cal metric(mask, gt mask):
-In this method you will evaluate your segmentation results. Given two binary
-images, the method will return a tuple of the accuracy (the number of pixels
-that are correctly labeled divided by the total number of pixels in the image)
-and the Jaccard similarity (the intersection over the union of your predicted
-foreground region with the ground truth).
-"""
+        is_conv = True
+    return is_conv
 
 
 def cal_metric(predicted_mask, gt_mask):
     # Convert masks to boolean arrays
-    predicted_mask_bool = predicted_mask.astype(bool)
-    gt_mask_bool = gt_mask.astype(bool)
+    pred_mask_boolean = predicted_mask.astype(bool)
+    gt_mask_boolean = gt_mask.astype(bool)
 
     # Calculate the number of correctly labeled pixels
-    correct_pixels = np.sum(predicted_mask_bool == gt_mask_bool)
-    total_pixels = predicted_mask.size
+    correct_pix = np.sum(pred_mask_boolean == gt_mask_boolean)
+    # Calculate the total number of pixels
+    total_pix = predicted_mask.size
 
     # Calculate the accuracy
-    accuracy = correct_pixels / total_pixels
+    accuracy = correct_pix / total_pix
 
-    # Calculate the Jaccard similarity
-    intersection = np.sum(predicted_mask_bool & gt_mask_bool)
-    union = np.sum(predicted_mask_bool | gt_mask_bool)
-    jaccard_similarity = intersection / union
+    # Calculate jaccard similarity
+    union_of_masks = np.sum(pred_mask_boolean | gt_mask_boolean)
+    inter_of_masks = np.sum(pred_mask_boolean & gt_mask_boolean)
+    jaccard = inter_of_masks / union_of_masks
 
-    return accuracy, jaccard_similarity
+    return accuracy, jaccard
 
 
 def parse():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input_name', type=str, default='memorial', help='name of image from the course files')
+    parser.add_argument('--input_name', type=str, default='teddy', help='name of image from the course files')
     parser.add_argument('--eval', type=int, default=1, help='calculate the metrics')
     parser.add_argument('--input_img_path', type=str, default='', help='if you wish to use your own img_path')
     parser.add_argument('--use_file_rect', type=int, default=1, help='Read rect from course files')
