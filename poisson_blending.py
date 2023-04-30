@@ -39,10 +39,10 @@ def poisson_blend(im_src, im_tgt, im_mask, center):
 
     # use the diagonal matrix used to create the laplacian matrix to create the laplacian matrix for the mask
     for y in range(1, mask_height - 1):
-        for vector_x in range(1, mask_width - 1):
-            if im_mask[y, vector_x] == 0:
+        for x in range(1, mask_width - 1):
+            if im_mask[y, x] == 0:
                 # calculate the index of the pixel in the mask (its row in the laplacian matrix)
-                row_ind = vector_x + y * mask_width
+                row_ind = x + y * mask_width
                 # set the values of the laplacian matrix to 0 for the corresponding pixel's row in the mask
                 diag_block_mat[row_ind, row_ind - mask_width] = 0
                 diag_block_mat[row_ind, row_ind + mask_width] = 0
