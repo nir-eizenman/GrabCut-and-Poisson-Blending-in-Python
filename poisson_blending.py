@@ -39,20 +39,20 @@ def poisson_blend(im_src, im_tgt, im_mask, center):
 
     # use the diagonal matrix used to create the laplacian matrix to create the laplacian matrix for the mask
     for y in range(1, mask_height - 1):
-        for vec_x in range(1, mask_width - 1):
-            if im_mask[y, vec_x] == 0:
+        for vector_x in range(1, mask_width - 1):
+            if im_mask[y, vector_x] == 0:
                 # calculate the index of the pixel in the mask (its row in the laplacian matrix)
-                k = vec_x + y * mask_width
+                row_ind = vector_x + y * mask_width
                 # set the values of the laplacian matrix to 0 for the corresponding pixel's row in the mask
-                diag_block_mat[k, k - mask_width] = 0
-                diag_block_mat[k, k + mask_width] = 0
-                diag_block_mat[k, k - 1] = 0
-                diag_block_mat[k, k + 1] = 0
+                diag_block_mat[row_ind, row_ind - mask_width] = 0
+                diag_block_mat[row_ind, row_ind + mask_width] = 0
+                diag_block_mat[row_ind, row_ind - 1] = 0
+                diag_block_mat[row_ind, row_ind + 1] = 0
                 # set the value of the corresponding pixel's row to 1 in its diagonal in the laplacian matrix
-                diag_block_mat[k, k] = 1
+                diag_block_mat[row_ind, row_ind] = 1
 
     # change the laplacian matrix to a compressed sparse column matrix (CSC) for faster calculations
-    mat_b = diag_block_mat.tocsc()
+    matrix_a = diag_block_mat.tocsc()
 
     # create an image for the result (currently containing the target image)
     im_blend = np.copy(im_tgt)
@@ -66,22 +66,22 @@ def poisson_blend(im_src, im_tgt, im_mask, center):
         flatten_source = im_src[:, :, channel].flatten()
 
         # calculate the b vector for the equation (Ax = b)
-        vec_b = lap_mat.dot(flatten_source)
+        vector_b = lap_mat.dot(flatten_source)
 
         # set the values of the b vector to the values of the target image where the mask is 0
-        vec_b[flatten_mask == 0] = flatten_target[flatten_mask == 0]
+        vector_b[flatten_mask == 0] = flatten_target[flatten_mask == 0]
 
         # solve the equation (Ax = b) for x
-        vec_x = spsolve(mat_b, vec_b)
+        vector_x = spsolve(matrix_a, vector_b)
 
         # if there are values outside the range [0, 255] clip them (255+ is set to 255 and 0- is set to 0),
         # convert the image to uint8 (unsigned int of 8 bits) and return it
-        vec_x = np.clip(vec_x, 0, 255).astype(np.uint8)
+        vector_x = np.clip(vector_x, 0, 255).astype(np.uint8)
 
-        vec_x = vec_x.reshape(mask_height, mask_width)
+        vector_x = vector_x.reshape(mask_height, mask_width)
 
         # update the result image with the calculated values where the mask is 255, else keep the target image values
-        im_blend[y_min:y_max, x_min:x_max, channel] = np.where(im_mask == 255, vec_x,
+        im_blend[y_min:y_max, x_min:x_max, channel] = np.where(im_mask == 255, vector_x,
                                                                im_tgt[y_min:y_max, x_min:x_max, channel])
 
     # Return the blended image
