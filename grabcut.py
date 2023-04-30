@@ -115,8 +115,8 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
 
     # Update foreground GMM ( same as the background GMM )
     fg_n_components = fgGMM.n_components
-    fg_weights = np.zeros(fg_n_components)
-    fg_means = np.zeros((fg_n_components, 3))
+    fg_w = np.zeros(fg_n_components)
+    fg_m = np.zeros((fg_n_components, 3))
     fg_covs = np.zeros((fg_n_components, 3, 3))
 
     for i in range(fg_n_components):
@@ -124,14 +124,14 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
         component_data = fg_data[component_mask]
 
         if len(component_data) > 0:
-            fg_weights[i] = len(component_data) / len(fg_data)
+            fg_w[i] = len(component_data) / len(fg_data)
             covar, means = cv2.calcCovarMatrix(component_data, None,
                                                cv2.COVAR_NORMAL | cv2.COVAR_SCALE | cv2.COVAR_ROWS)
-            fg_means[i] = means.flatten()
+            fg_m[i] = means.flatten()
             fg_covs[i] = covar
 
-    fgGMM.weights_ = fg_weights
-    fgGMM.means_ = fg_means
+    fgGMM.weights_ = fg_w
+    fgGMM.means_ = fg_m
     fgGMM.covariances_ = fg_covs
 
     # Check if any of the GMM weights are 0, if so remove the component
@@ -169,7 +169,7 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
 
 def calculate_mincut(img, mask, bgGMM, fgGMM):
     h, w = img.shape[:2]
-    img_indices = np.arange(h * w).reshape(h, w)
+    index_for_pixels = np.arange(h * w).reshape(h, w)
     mc_graph = ig.Graph()
     mc_graph.add_vertices(h * w + 2)
     source = h * w
@@ -215,8 +215,8 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
     gamma = 50
 
     # Add edges to the graph
-    edges = []
-    weights = []
+    edge_list = []
+    weight_list = []
 
     # calculate N-links
     for i in range(h):
@@ -225,119 +225,119 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
             # (used to T-link, but calculated as the maximum of all N-links that are connected to the pixel)
             k = 0
             # set the node index of the current pixel
-            curr_node = img_indices[i, j]
+            curr_node = index_for_pixels[i, j]
 
             # Calculate edge weight for top neighbor
             if i > 0:
-                second_node = img_indices[i - 1, j]
+                second_node = index_for_pixels[i - 1, j]
                 # color difference between the current pixel and its top left neighbor
                 # calculated by the norm of the difference between the two pixel's color vectors
-                color_difference = (np.linalg.norm(img[i, j] - img[i - 1, j])) ** 2
-                edge_weight = gamma * np.exp(-beta * color_difference)
-                edges.append((curr_node, second_node))
-                weights.append(edge_weight)
-                k = max(k, edge_weight)
+                colors_difference = (np.linalg.norm(img[i, j] - img[i - 1, j])) ** 2
+                edge_w = gamma * np.exp(-beta * colors_difference)
+                edge_list.append((curr_node, second_node))
+                weight_list.append(edge_w)
+                k = max(k, edge_w)
 
             # Calculate edge weight for left neighbor
             if j > 0:
-                second_node = img_indices[i, j - 1]
+                second_node = index_for_pixels[i, j - 1]
                 # color difference between the current pixel and its top left neighbor
                 # calculated by the norm of the difference between the two pixel's color vectors
-                color_difference = (np.linalg.norm(img[i, j] - img[i, j - 1])) ** 2
-                edge_weight = gamma * np.exp(-beta * color_difference)
-                edges.append((curr_node, second_node))
-                weights.append(edge_weight)
-                k = max(k, edge_weight)
+                colors_difference = (np.linalg.norm(img[i, j] - img[i, j - 1])) ** 2
+                edge_w = gamma * np.exp(-beta * colors_difference)
+                edge_list.append((curr_node, second_node))
+                weight_list.append(edge_w)
+                k = max(k, edge_w)
 
             # Calculate edge weight for right neighbor
             if j < w - 1:
-                second_node = img_indices[i, j + 1]
+                second_node = index_for_pixels[i, j + 1]
                 # color difference between the current pixel and its top left neighbor
                 # calculated by the norm of the difference between the two pixel's color vectors
-                color_difference = (np.linalg.norm(img[i, j] - img[i, j + 1])) ** 2
-                edge_weight = gamma * np.exp(-beta * color_difference)
-                edges.append((curr_node, second_node))
-                weights.append(edge_weight)
-                k = max(k, edge_weight)
+                colors_difference = (np.linalg.norm(img[i, j] - img[i, j + 1])) ** 2
+                edge_w = gamma * np.exp(-beta * colors_difference)
+                edge_list.append((curr_node, second_node))
+                weight_list.append(edge_w)
+                k = max(k, edge_w)
 
             # Calculate edge weight for bottom neighbor
             if i < h - 1:
-                second_node = img_indices[i + 1, j]
+                second_node = index_for_pixels[i + 1, j]
                 # color difference between the current pixel and its top left neighbor
                 # calculated by the norm of the difference between the two pixel's color vectors
-                color_difference = (np.linalg.norm(img[i, j] - img[i + 1, j])) ** 2
-                edge_weight = gamma * np.exp(-beta * color_difference)
-                edges.append((curr_node, second_node))
-                weights.append(edge_weight)
-                k = max(k, edge_weight)
+                colors_difference = (np.linalg.norm(img[i, j] - img[i + 1, j])) ** 2
+                edge_w = gamma * np.exp(-beta * colors_difference)
+                edge_list.append((curr_node, second_node))
+                weight_list.append(edge_w)
+                k = max(k, edge_w)
 
             # calculate edge weight for top left neighbor
             if i > 0 and j > 0:
-                second_node = img_indices[i - 1, j - 1]
+                second_node = index_for_pixels[i - 1, j - 1]
                 # color difference between the current pixel and its top left neighbor
                 # calculated by the norm of the difference between the two pixel's color vectors
-                color_difference = (np.linalg.norm(img[i, j] - img[i - 1, j - 1])) ** 2
+                colors_difference = (np.linalg.norm(img[i, j] - img[i - 1, j - 1])) ** 2
                 # dividing by sqrt(2) because distance between the pixels is sqrt(2) in case of diagonal neighbors
-                edge_weight = (1 / np.sqrt(2)) * gamma * np.exp(-beta * color_difference)
-                edges.append((curr_node, second_node))
-                weights.append(edge_weight)
-                k = max(k, edge_weight)
+                edge_w = (1 / np.sqrt(2)) * gamma * np.exp(-beta * colors_difference)
+                edge_list.append((curr_node, second_node))
+                weight_list.append(edge_w)
+                k = max(k, edge_w)
 
             # calculate edge weight for bottom left neighbor
             if i < h - 1 and j > 0:
-                second_node = img_indices[i + 1, j - 1]
+                second_node = index_for_pixels[i + 1, j - 1]
                 # color difference between the current pixel and its top left neighbor
                 # calculated by the norm of the difference between the two pixel's color vectors
-                color_difference = (np.linalg.norm(img[i, j] - img[i + 1, j - 1])) ** 2
+                colors_difference = (np.linalg.norm(img[i, j] - img[i + 1, j - 1])) ** 2
                 # dividing by sqrt(2) because distance between the pixels is sqrt(2) in case of diagonal neighbors
-                edge_weight = (1 / np.sqrt(2)) * gamma * np.exp(-beta * color_difference)
-                edges.append((curr_node, second_node))
-                weights.append(edge_weight)
-                k = max(k, edge_weight)
+                edge_w = (1 / np.sqrt(2)) * gamma * np.exp(-beta * colors_difference)
+                edge_list.append((curr_node, second_node))
+                weight_list.append(edge_w)
+                k = max(k, edge_w)
 
             # calculate edge weight for top right neighbor
             if i > 0 and j < w - 1:
-                second_node = img_indices[i - 1, j + 1]
+                second_node = index_for_pixels[i - 1, j + 1]
                 # color difference between the current pixel and its top left neighbor
                 # calculated by the norm of the difference between the two pixel's color vectors
-                color_difference = (np.linalg.norm(img[i, j] - img[i - 1, j + 1])) ** 2
+                colors_difference = (np.linalg.norm(img[i, j] - img[i - 1, j + 1])) ** 2
                 # dividing by sqrt(2) because distance between the pixels is sqrt(2) in case of diagonal neighbors
-                edge_weight = (1 / np.sqrt(2)) * gamma * np.exp(-beta * color_difference)
-                edges.append((curr_node, second_node))
-                weights.append(edge_weight)
-                k = max(k, edge_weight)
+                edge_w = (1 / np.sqrt(2)) * gamma * np.exp(-beta * colors_difference)
+                edge_list.append((curr_node, second_node))
+                weight_list.append(edge_w)
+                k = max(k, edge_w)
 
             # calculate edge weight for bottom right neighbor
             if i < h - 1 and j < w - 1:
-                second_node = img_indices[i + 1, j + 1]
+                second_node = index_for_pixels[i + 1, j + 1]
                 # color difference between the current pixel and its top left neighbor
                 # calculated by the norm of the difference between the two pixel's color vectors
-                color_difference = (np.linalg.norm(img[i, j] - img[i + 1, j + 1])) ** 2
+                colors_difference = (np.linalg.norm(img[i, j] - img[i + 1, j + 1])) ** 2
                 # dividing by sqrt(2) because distance between the pixels is sqrt(2) in case of diagonal neighbors
-                edge_weight = (1 / np.sqrt(2)) * gamma * np.exp(-beta * color_difference)
-                edges.append((curr_node, second_node))
-                weights.append(edge_weight)
-                k = max(k, edge_weight)
+                edge_w = (1 / np.sqrt(2)) * gamma * np.exp(-beta * colors_difference)
+                edge_list.append((curr_node, second_node))
+                weight_list.append(edge_w)
+                k = max(k, edge_w)
 
             # get the value of Dback for the current pixel
             d_back = d_term[i, j, 0]
             # get the value of Dfore for the current pixel
             d_fore = d_term[i, j, 1]
-            edges.append((source, curr_node))
-            edges.append((curr_node, sink))
+            edge_list.append((source, curr_node))
+            edge_list.append((curr_node, sink))
 
             # check if the current pixel is a background pixel or a foreground pixel using the mask
             if mask[i, j] == GC_PR_FGD or mask[i, j] == GC_PR_BGD:
-                weights.append(d_fore)
-                weights.append(d_back)
+                weight_list.append(d_fore)
+                weight_list.append(d_back)
             if mask[i, j] == GC_FGD:
-                weights.append(0)
-                weights.append(k)
+                weight_list.append(0)
+                weight_list.append(k)
             if mask[i, j] == GC_BGD:
-                weights.append(k)
-                weights.append(0)
+                weight_list.append(k)
+                weight_list.append(0)
 
-    mc_graph.add_edges(edges, {'weight': weights})
+    mc_graph.add_edges(edge_list, {'weight': weight_list})
 
     mincut_result = mc_graph.st_mincut(source, sink, capacity='weight')
 
@@ -348,13 +348,13 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
 
 def update_mask(mincut_sets, mask):
     h, w = mask.shape
-    im_indices = np.arange(h * w).reshape(h, w)
+    index_for_pixel = np.arange(h * w).reshape(h, w)
     mask_copy = np.copy(mask)
     for i in range(h):
         for j in range(w):
-            if im_indices[i, j] in mincut_sets[0] and (mask[i, j] == GC_PR_FGD or mask[i, j] == GC_PR_BGD):
+            if index_for_pixel[i, j] in mincut_sets[0] and (mask[i, j] == GC_PR_FGD or mask[i, j] == GC_PR_BGD):
                 mask_copy[i, j] = GC_PR_BGD
-            elif im_indices[i, j] in mincut_sets[1] and (mask[i, j] == GC_PR_FGD or mask[i, j] == GC_PR_BGD):
+            elif index_for_pixel[i, j] in mincut_sets[1] and (mask[i, j] == GC_PR_FGD or mask[i, j] == GC_PR_BGD):
                 mask_copy[i, j] = GC_PR_FGD
 
     mask = np.copy(mask_copy)
